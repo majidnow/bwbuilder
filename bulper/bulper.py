@@ -97,7 +97,7 @@ for c in VARIATION_LIST:
     # add crc
     crc = subprocess.check_output(["../crcc/main.exe", f"{des_dir}/update.bin"]).decode()
     print("CRC:", crc)
-    crc_bytes = int(crc).to_bytes(2, byteorder='big')
+    crc_bytes = int(crc).to_bytes(2, byteorder='little')
     with open(f"{des_dir}/update.bin", "ab") as update:
         update.write(crc_bytes)
     
