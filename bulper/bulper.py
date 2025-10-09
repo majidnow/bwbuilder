@@ -4,7 +4,11 @@ BW_WORKSPACE="D:/Projects/STM32CubeIDE/workspace_1.15.0"
 BW_PROJECT_DIR=BW_WORKSPACE+"/BeachWolf"
 CDT_DIR="C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/headless-build.bat"
 RELEAS_DIR="D:/Storage/beachwolf/Archive/Release"
-VARIATION_LIST=["FC22-01", "FC22-02", "FC22-02-LL", "FC22-03",, "FC22R-01", "FC22R-02"]
+WL_RELEASE_PATH="D:/Storage/wolfloader/Archive/ver 101"
+SRECORD_DIR=r"C:\Portables\srecord\bin\srec_cat.exe"
+CRC_GEN_PATH=r"D:\Storage\tools\crcc\main.exe"
+VARIATION_LIST=["FC22-01", "FC22-02", "FC22-02-LL", "FC22-03", "FC22R-01", "FC22R-02"]
+UPDATE_PATHES_LIST=["S-1", "S-2", "S-2-LL", "S-3", "AR-1", "AR-2", "BL"]
 
 def find_nth(haystack: str, needle: str, n: int) -> int:
     start = haystack.find(needle)
@@ -84,25 +88,53 @@ for c in VARIATION_LIST:
 # print(build_cmd)
 subprocess.run(build_cmd, capture_output=False, text=False)
 
+RELEASE_PATH = f"{RELEAS_DIR}/{VERSION_DIR}"
+UPDATE_DIR = f"{RELEASE_PATH}/FC22-UPDATE"
+
+# add WolfLoader
+WL_DES_DIR = f"{RELEASE_PATH}/WolfLoader"
+WL_PATH = f"{WL_DES_DIR}/WolfLoader.hex"
+os.makedirs(WL_DES_DIR, exist_ok=True)
+shutil.copy(f"{WL_RELEASE_PATH}/WolfLoader.hex", 
+            f"{WL_PATH}")
+shutil.copy(f"{WL_RELEASE_PATH}/update.bin", 
+            f"{WL_DES_DIR}/update.bin")
+crc = subprocess.check_output([CRC_GEN_PATH, f"{WL_DES_DIR}/update.bin"]).decode()
+crc_bytes = int(crc).to_bytes(2, byteorder='little')
+with open(f"{WL_DES_DIR}/update.bin", "ab") as update:
+    update.write(crc_bytes)
+# add WolfLoader to Update path
+wl_update_dir = f"{UPDATE_DIR}/{UPDATE_PATHES_LIST[-1]}"
+os.makedirs(wl_update_dir, exist_ok=True)
+shutil.copy(f"{WL_DES_DIR}/update.bin", 
+            f"{wl_update_dir}/update.bin")
+
 # move outputs to release folder
-for c in VARIATION_LIST:
+for c, u in zip(VARIATION_LIST, UPDATE_PATHES_LIST):
     src_dir = f"{BW_PROJECT_DIR}/{c}"
-    des_dir = f"{RELEAS_DIR}/{VERSION_DIR}/{c}"
+    des_dir = f"{RELEASE_PATH}/{c}"
     # print(src_dir, des_dir)
     os.makedirs(des_dir, exist_ok=True)
     shutil.copy(f"{src_dir}/BeachWolf.hex", 
                 f"{des_dir}/BeachWolf.hex")
     shutil.copy(f"{src_dir}/update.bin", 
                 f"{des_dir}/update.bin")
+    
+    # merge WolfLoader and BeachWolf
+    merge_hex_cmd = [SRECORD_DIR, WL_PATH, '-Intel', f"{des_dir}/BeachWolf.hex", '-Intel',
+                    "-o", f"{des_dir}/Firmware.hex", '-Intel']
+    subprocess.run(merge_hex_cmd, capture_output=False, text=False)
+
     # add crc
-    crc = subprocess.check_output(["../crcc/main.exe", f"{des_dir}/update.bin"]).decode()
+    crc = subprocess.check_output([CRC_GEN_PATH, f"{des_dir}/update.bin"]).decode()
     print("CRC:", crc)
     crc_bytes = int(crc).to_bytes(2, byteorder='little')
     with open(f"{des_dir}/update.bin", "ab") as update:
         update.write(crc_bytes)
-    
 
-
-
-
+    # copy .bin to Update-Directory
+    update_dir = f"{UPDATE_DIR}/{u}"
+    os.makedirs(update_dir, exist_ok=True)
+    shutil.copy(f"{des_dir}/update.bin",
+                f"{update_dir}/update.bin")
     
