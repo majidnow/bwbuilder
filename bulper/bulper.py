@@ -80,6 +80,11 @@ with open(args.directory+args.version, 'r+') as f:
    VERSION_DIR = f"{current_build_version+1}-{hash}"
 
 # build
+# Symbols to pass
+PREPROCESSOR_SYMBOLS = "-DMAIN_RELEASE"
+# Copy existing environment and add USER_CFLAGS
+env = os.environ.copy()
+env["USER_CFLAGS"] = PREPROCESSOR_SYMBOLS
 # create configuration list
 build_cmd = [CDT_DIR, '-data', BW_WORKSPACE]
 for c in VARIATION_LIST:
