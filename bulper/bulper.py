@@ -1,14 +1,25 @@
 import argparse, subprocess, shutil, os
 
 BW_WORKSPACE="D:/Projects/STM32CubeIDE/workspace_1.15.0"
-BW_PROJECT_DIR=BW_WORKSPACE+"/BeachWolf"
 CDT_DIR="C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/headless-build.bat"
 RELEAS_DIR="D:/Storage/beachwolf/Archive/Release"
-WL_RELEASE_PATH="D:/Storage/wolfloader/Archive/ver 101"
-SRECORD_DIR=r"C:\Portables\srecord\bin\srec_cat.exe"
+WL_RELEASE_PATH="D:/Storage/wolfloader/Archive/ver 2"
 CRC_GEN_PATH=r"D:\Storage\tools\crcc\main.exe"
-VARIATION_LIST=["FC22-01", "FC22-02", "FC22-02-LL", "FC22-03", "FC22R-01", "FC22R-02"]
-UPDATE_PATHES_LIST=["S-1", "S-2", "S-2-LL", "S-3", "AR-1", "AR-2", "BL"]
+
+# BW_WORKSPACE=r"D:\Projects\Programming\STM32CubeIDE\workspace_1.19.0"
+# CDT_DIR=r"C:\ST\STM32CubeIDE_1.19.0\STM32CubeIDE\headless-build.bat"
+# RELEAS_DIR=r"D:\Data\Storage\beachwolf\Archive\Release"
+# WL_RELEASE_PATH=r"D:\Data\Storage\wolfloader\Archive\ver 2"
+# CRC_GEN_PATH=r"D:\Data\Storage\tools\bulper-v2\crcc\main.exe"
+
+BW_PROJECT_DIR=BW_WORKSPACE+"/BeachWolf"
+SRECORD_DIR=r"C:\Portables\srecord\bin\srec_cat.exe"
+
+# VARIATION_LIST=["FC22-01", "FC22-02", "FC22-02-LL", "FC22-03", "FC22R-01", "FC22R-02"]
+# UPDATE_PATHES_LIST=["S-1", "S-2", "S-2-LL", "S-3", "AR-1", "AR-2", "BL"]
+
+VARIATION_LIST=["FC22-03"]
+UPDATE_PATHES_LIST=["S-3", "BL"]
 
 def find_nth(haystack: str, needle: str, n: int) -> int:
     start = haystack.find(needle)
@@ -24,20 +35,20 @@ parser = argparse.ArgumentParser(description='Build Helper')
 # corresponding value should be stored in the `algo` 
 # field, and using a default value if the argument 
 # isn't given
-parser.add_argument('-d', action="store", dest='directory', default=0, help='project directory')
-parser.add_argument('-v', action="store", dest='version', default=0, help='file that contain version variables')
-parser.add_argument('-b', action="store", dest='build', default=0, help='which build version variable need to increase', type=int)
+parser.add_argument('-d', action="store", dest='directory', default=BW_PROJECT_DIR, help='project directory')
+parser.add_argument('-v', action="store", dest='version', default=r"\BeachWolf\include\versions.h", help='file that contain version variables')
+parser.add_argument('-b', action="store", dest='build', default="12345678", help='which build version variable need to increase', type=int)
 
 # Now, parse the command line arguments and store the 
 # values in the `args` variable
 args = parser.parse_args()
 
 # stash repository to make sure the compiled code build from the last commit
-stash = subprocess.check_output(["git", "stash"], cwd=args.directory).strip().decode()
-if stash != 'No local changes to save':
-    print( "The working directory is NOT clean")
-    subprocess.check_output(["git", "stash", "pop"], cwd=args.directory)
-    exit(1)
+# stash = subprocess.check_output(["git", "stash"], cwd=args.directory).strip().decode()
+# if stash != 'No local changes to save':
+#     print( "The working directory is NOT clean")
+#     subprocess.check_output(["git", "stash", "pop"], cwd=args.directory)
+#     exit(1)
 
 
 # get commit hash
@@ -74,10 +85,10 @@ with open(args.directory+args.version, 'r+') as f:
    current_build_version = int(current_build_version_str)
 #    f.seek(0)
 #    f.write(content[0:start])
-   f.write(str(current_build_version+1))
-   f.write(content[end:len(content)])
-   print(f"Build Version: {current_build_version+1}, Commit Hash: {hash}")
-   VERSION_DIR = f"{current_build_version+1}-{hash}"
+#    f.write(str(current_build_version+1))
+#    f.write(content[end:len(content)])
+   print(f"Build Version: {current_build_version}, Commit Hash: {hash}")
+   VERSION_DIR = f"{current_build_version}-{hash}"
 
 # build
 # Symbols to pass
@@ -91,7 +102,7 @@ for c in VARIATION_LIST:
     build_cmd.append("-cleanBuild")
     build_cmd.append("BeachWolf/"+c)
 # print(build_cmd)
-subprocess.run(build_cmd, capture_output=False, text=False)
+# subprocess.run(build_cmd, capture_output=False, text=False)
 
 RELEASE_PATH = f"{RELEAS_DIR}/{VERSION_DIR}"
 UPDATE_DIR = f"{RELEASE_PATH}/FC22-UPDATE"
@@ -126,9 +137,9 @@ for c, u in zip(VARIATION_LIST, UPDATE_PATHES_LIST):
                 f"{des_dir}/update.bin")
     
     # merge WolfLoader and BeachWolf
-    merge_hex_cmd = [SRECORD_DIR, WL_PATH, '-Intel', f"{des_dir}/BeachWolf.hex", '-Intel',
-                    "-o", f"{des_dir}/Firmware.hex", '-Intel']
-    subprocess.run(merge_hex_cmd, capture_output=False, text=False)
+    # merge_hex_cmd = [SRECORD_DIR, WL_PATH, '-Intel', f"{des_dir}/BeachWolf.hex", '-Intel',
+    #                 "-o", f"{des_dir}/Firmware.hex", '-Intel']
+    # subprocess.run(merge_hex_cmd, capture_output=False, text=False)
 
     # add crc
     crc = subprocess.check_output([CRC_GEN_PATH, f"{des_dir}/update.bin"]).decode()
