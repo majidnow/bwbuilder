@@ -56,7 +56,7 @@ hash = subprocess.check_output(["git", "describe", "--always"], cwd=args.directo
 
 # build version increment and set commit hash
 COMMIT_HASH_TOKEN = 'COMMIT_HASH'
-BUILD_VERSION_TOKEN = 'BUILD_VERSION'
+BUILD_VERSION_TOKEN = 'REVISION'
 VERSION_DIR = ""
 with open(args.directory+args.version, 'r+') as f:
    content = f.read()
@@ -76,7 +76,7 @@ with open(args.directory+args.version, 'r+') as f:
        if c >= '0' and c <= '9':
            break
        start += 1
-   f.write(content[end:start])
+#    f.write(content[end:start])
    end   = content[start:start+10].find('\n')+start
 #    print(start, end)
    current_build_version_str = content[start:end]
