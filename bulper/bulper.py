@@ -15,11 +15,21 @@ CRC_GEN_PATH=r"D:\Storage\tools\crcc\main.exe"
 BW_PROJECT_DIR=BW_WORKSPACE+"/BeachWolf"
 SRECORD_DIR=r"C:\Portables\srecord\bin\srec_cat.exe"
 
-# VARIATION_LIST=["FC22-01", "FC22-02", "FC22-02-LL", "FC22-03", "FC22R-01", "FC22R-02"]
-# UPDATE_PATHES_LIST=["S-1", "S-2", "S-2-LL", "S-3", "AR-1", "AR-2", "BL"]
+VARIATION_LIST=["FC22-01", "FC22-02", "FC22-02-LL", "FC22-03", "FC22R-01", "FC22R-02"]
+UPDATE_PATHES_LIST=["S-1", "S-2", "S-2-LL", "S-3", "AR-1", "AR-2", "BL"]
 
-VARIATION_LIST=["FC22-03"]
-UPDATE_PATHES_LIST=["S-3", "BL"]
+# VARIATION_LIST=["FC22-03", "FC22R-02"]
+# UPDATE_PATHES_LIST=["S-3", "AR-2", "BL"]
+
+BLACK   = "\033[30m"
+RED     = "\033[31m"
+GREEN   = "\033[32m"
+YELLOW  = "\033[33m"
+BLUE    = "\033[34m"
+MAGENTA = "\033[35m"
+CYAN    = "\033[36m"
+WHITE   = "\033[37m"
+RESET   = "\033[0m"
 
 def find_nth(haystack: str, needle: str, n: int) -> int:
     start = haystack.find(needle)
@@ -44,11 +54,11 @@ parser.add_argument('-b', action="store", dest='build', default="12345678", help
 args = parser.parse_args()
 
 # stash repository to make sure the compiled code build from the last commit
-# stash = subprocess.check_output(["git", "stash"], cwd=args.directory).strip().decode()
-# if stash != 'No local changes to save':
-#     print( "The working directory is NOT clean")
-#     subprocess.check_output(["git", "stash", "pop"], cwd=args.directory)
-#     exit(1)
+stash = subprocess.check_output(["git", "stash"], cwd=args.directory).strip().decode()
+if stash != 'No local changes to save':
+    print( "The working directory is NOT clean")
+    subprocess.check_output(["git", "stash", "pop"], cwd=args.directory)
+    exit(1)
 
 
 # get commit hash
@@ -83,12 +93,14 @@ with open(args.directory+args.version, 'r+') as f:
 #    print(current_build_version_str)
 #    print(":".join("{:02x}".format(ord(c)) for c in content[start:start+end]))
    current_build_version = int(current_build_version_str)
-#    f.seek(0)
-#    f.write(content[0:start])
-#    f.write(str(current_build_version+1))
-#    f.write(content[end:len(content)])
-   print(f"Build Version: {current_build_version}, Commit Hash: {hash}")
+   print(f"{RED}Build Version: {YELLOW}{current_build_version}, {RED}Commit Hash: {YELLOW}{hash}{RESET}")
    VERSION_DIR = f"{current_build_version}-{hash}"
+
+answer = input(f"{YELLOW}Continue? (y/n): {RESET}").strip().lower()
+if answer != "y":
+    print(f"{RED}Cancelled.{RESET}")
+    exit()
+print(f"{GREEN}Continuing...{RESET}")
 
 # build
 # Symbols to pass
@@ -102,7 +114,11 @@ for c in VARIATION_LIST:
     build_cmd.append("-cleanBuild")
     build_cmd.append("BeachWolf/"+c)
 # print(build_cmd)
-# subprocess.run(build_cmd, capture_output=False, text=False)
+result = subprocess.run(build_cmd, capture_output=False, text=False)
+
+if result.returncode > 0:
+    print(f"{RED}Build failed{RESET}")
+    exit()
 
 RELEASE_PATH = f"{RELEAS_DIR}/{VERSION_DIR}"
 UPDATE_DIR = f"{RELEASE_PATH}/FC22-UPDATE"
@@ -143,7 +159,7 @@ for c, u in zip(VARIATION_LIST, UPDATE_PATHES_LIST):
 
     # add crc
     crc = subprocess.check_output([CRC_GEN_PATH, f"{des_dir}/update.bin"]).decode()
-    print("CRC:", crc)
+    print(f"{c} CRC: {crc}")
     crc_bytes = int(crc).to_bytes(2, byteorder='little')
     with open(f"{des_dir}/update.bin", "ab") as update:
         update.write(crc_bytes)
