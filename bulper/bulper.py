@@ -118,7 +118,7 @@ for c in VARIATION_LIST:
 result = subprocess.run(build_cmd, capture_output=False, text=False)
 
 if result.returncode > 0:
-    print(f"{RED}Build failed{RESET}")
+    print(f"{RED}Build failed: {YELLOW}{result.args}{RESET}")
     exit()
 
 RELEASE_PATH = f"{RELEAS_DIR}/{VERSION_DIR}"
