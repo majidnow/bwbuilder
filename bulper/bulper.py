@@ -65,6 +65,7 @@ if stash != 'No local changes to save':
 hash = subprocess.check_output(["git", "describe", "--always"], cwd=args.directory).strip().decode()
 
 # build version increment and set commit hash
+current_build_version = 0;
 COMMIT_HASH_TOKEN = 'COMMIT_HASH'
 BUILD_VERSION_TOKEN = 'REVISION'
 VERSION_DIR = ""
@@ -123,6 +124,10 @@ if result.returncode > 0:
 RELEASE_PATH = f"{RELEAS_DIR}/{VERSION_DIR}"
 UPDATE_DIR = f"{RELEASE_PATH}/FC22-UPDATE"
 
+# we use bootloader ver 1 for 50 and olders
+if current_build_version < 51:
+    WL_RELEASE_PATH="D:/Storage/wolfloader/Archive/ver 1"
+
 # add WolfLoader
 WL_DES_DIR = f"{RELEASE_PATH}/WolfLoader"
 WL_PATH = f"{WL_DES_DIR}/WolfLoader.hex"
@@ -135,11 +140,13 @@ crc = subprocess.check_output([CRC_GEN_PATH, f"{WL_DES_DIR}/update.bin"]).decode
 crc_bytes = int(crc).to_bytes(2, byteorder='little')
 with open(f"{WL_DES_DIR}/update.bin", "ab") as update:
     update.write(crc_bytes)
-# add WolfLoader to Update path
-wl_update_dir = f"{UPDATE_DIR}/{UPDATE_PATHES_LIST[-1]}"
-os.makedirs(wl_update_dir, exist_ok=True)
-shutil.copy(f"{WL_DES_DIR}/update.bin", 
-            f"{wl_update_dir}/update.bin")
+
+# add WolfLoader to Update path for rev-51 and later
+if current_build_version > 50:
+    wl_update_dir = f"{UPDATE_DIR}/{UPDATE_PATHES_LIST[-1]}"
+    os.makedirs(wl_update_dir, exist_ok=True)
+    shutil.copy(f"{WL_DES_DIR}/update.bin", 
+                f"{wl_update_dir}/update.bin")
 
 # move outputs to release folder
 for c, u in zip(VARIATION_LIST, UPDATE_PATHES_LIST):
@@ -164,9 +171,10 @@ for c, u in zip(VARIATION_LIST, UPDATE_PATHES_LIST):
     with open(f"{des_dir}/update.bin", "ab") as update:
         update.write(crc_bytes)
 
-    # copy .bin to Update-Directory
-    update_dir = f"{UPDATE_DIR}/{u}"
-    os.makedirs(update_dir, exist_ok=True)
-    shutil.copy(f"{des_dir}/update.bin",
-                f"{update_dir}/update.bin")
+    # copy .bin to Update-Directory for rev-51 and later
+    if current_build_version > 50:
+        update_dir = f"{UPDATE_DIR}/{u}"
+        os.makedirs(update_dir, exist_ok=True)
+        shutil.copy(f"{des_dir}/update.bin",
+                    f"{update_dir}/update.bin")
     
