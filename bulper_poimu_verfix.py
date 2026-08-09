@@ -1,6 +1,6 @@
 # added by poimu
 """
-This file is intentionally separate from bulper_poimu_final(3).py so the proven
+This file is intentionally separate from bulper_poimu_final.py so the proven
 release flow remains untouched. It preserves the original structure, GUI
 support, and comments; only the versions.h update is made safer by applying it
 after user confirmation and restoring the exact original file on process exit.
