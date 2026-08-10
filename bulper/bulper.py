@@ -18,8 +18,8 @@ SRECORD_DIR=r"C:\Portables\srecord\bin\srec_cat.exe"
 VARIATION_LIST=["FC22-01", "FC22-02", "FC22-02-LL", "FC22-03", "FC22R-01", "FC22R-02"]
 UPDATE_PATHES_LIST=["S-1", "S-2", "S-2-LL", "S-3", "AR-1", "AR-2", "BL"]
 
-# VARIATION_LIST=["FC22-03", "FC22R-02"]
-# UPDATE_PATHES_LIST=["S-3", "AR-2", "BL"]
+# VARIATION_LIST=["FC22-03"]
+# UPDATE_PATHES_LIST=["S-3", "BL"]
 
 BLACK   = "\033[30m"
 RED     = "\033[31m"
