@@ -5,17 +5,14 @@ import re
 import shutil
 import subprocess
 import sys
+
+import tempfile
+
 import threading
 import tkinter as tk
 import xml.etree.ElementTree as ET
 from tkinter import filedialog, messagebox, ttk
 
-# ============================================================
-# GUI - FARTAK CONTROL / HELP BUILDER
-# Separate from bulper_poimu_final.py
-# ============================================================
-
-# GUI added by poimu
 BACKEND = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "bulper_poimu_final.py",
@@ -32,9 +29,6 @@ VARIATION_LIST = [
 
 DEFAULT_WORKSPACE = "D:/Projects/STM32CubeIDE/workspace_1.15.0"
 DEFAULT_IDE = "C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/headless-build.bat"
-DEFAULT_RELEASE = "D:/Storage/beachwolf/Archive/Release"
-DEFAULT_WOLFLOADER_V2 = "D:/Storage/wolfloader/Archive/ver 2"
-DEFAULT_WOLFLOADER_V1 = "D:/Storage/wolfloader/Archive/ver 1"
 DEFAULT_CRC = r"D:\Storage\tools\crcc\main.exe"
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -45,10 +39,8 @@ VERSION = re.compile(
 
 APP_ICON_PNG = """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"""
 
-
 def hidden_flags():
     return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-
 
 def read_project_name(project_dir):
     project_file = os.path.join(project_dir, ".project")
@@ -60,7 +52,6 @@ def read_project_name(project_dir):
         except ET.ParseError:
             pass
     return os.path.basename(os.path.normpath(project_dir))
-
 
 def resolve_workspace_project(selected_path):
     selected_path = os.path.abspath(
@@ -104,7 +95,6 @@ def resolve_workspace_project(selected_path):
     if not projects:
         raise ValueError(".cproject not found")
     raise ValueError("Multiple STM32 projects found")
-
 
 def read_cproject(project_dir):
     tree = ET.parse(os.path.join(project_dir, ".cproject"))
@@ -157,7 +147,6 @@ def read_cproject(project_dir):
 
     return result
 
-
 def resolve_version_file(project_dir):
     for folder in ("include", "Inc", "Include"):
         path = os.path.join(project_dir, folder, "versions.h")
@@ -174,6 +163,102 @@ def resolve_version_file(project_dir):
 
     raise ValueError("versions.h not found")
 
+def read_version_preprocessors(version_path):
+    with open(version_path, "r", encoding="utf-8", errors="replace") as source:
+        content = source.read()
+
+    guard_match = re.search(
+        r"(?m)^\s*#\s*ifndef\s+([A-Za-z_]\w*)\s*$"
+        r"\s*#\s*define\s+\1\b",
+        content,
+    )
+    guard = guard_match.group(1) if guard_match else None
+
+    symbols = []
+
+    def add_symbol(symbol):
+        if symbol != guard and symbol not in symbols:
+            symbols.append(symbol)
+
+    for line in content.splitlines():
+        match = re.match(
+            r"^\s*#\s*(?:ifdef|ifndef)\s+([A-Za-z_]\w*)\b",
+            line,
+        )
+        if match:
+            add_symbol(match.group(1))
+            continue
+
+        condition = re.match(r"^\s*#\s*(?:if|elif)\b(.*)", line)
+        if not condition:
+            continue
+
+        expression = re.split(r"//|/\*", condition.group(1), maxsplit=1)[0]
+        defined_symbols = re.findall(
+            r"\bdefined\s*(?:\(\s*([A-Za-z_]\w*)\s*\)|([A-Za-z_]\w*))",
+            expression,
+        )
+        if defined_symbols:
+            for parenthesized, bare in defined_symbols:
+                add_symbol(parenthesized or bare)
+            continue
+
+        simple = re.match(
+            r"^\s*!?\s*([A-Za-z_]\w*)\s*(?:$|//|/\*)",
+            expression,
+        )
+        if simple:
+            add_symbol(simple.group(1))
+
+    return symbols
+
+def project_uses_user_cflags(project_dir, configuration_names):
+    tree = ET.parse(os.path.join(project_dir, ".cproject"))
+    matched = set()
+
+    for config in tree.getroot().iter("cconfiguration"):
+        name = None
+        for item in config.iter():
+            if (
+                item.tag.endswith("storageModule")
+                and item.attrib.get("moduleId")
+                    == "org.eclipse.cdt.core.settings"
+                and item.attrib.get("name")
+            ):
+                name = item.attrib["name"]
+                break
+
+        if not name:
+            for item in config.iter():
+                if (
+                    item.tag.endswith("configuration")
+                    and item.attrib.get("name")
+                ):
+                    name = item.attrib["name"]
+                    break
+
+        if name not in configuration_names:
+            continue
+
+        c_flags = False
+        cpp_flags = False
+        for tool in config.iter("tool"):
+            identity = " ".join((
+                tool.attrib.get("id", ""),
+                tool.attrib.get("name", ""),
+                tool.attrib.get("superClass", ""),
+            )).lower()
+            if "USER_CFLAGS" not in ET.tostring(tool, encoding="unicode"):
+                continue
+            if "g++ compiler" in identity or ".cpp.compiler" in identity:
+                cpp_flags = True
+            elif "gcc compiler" in identity or ".c.compiler" in identity:
+                c_flags = True
+
+        if c_flags and cpp_flags:
+            matched.add(name)
+
+    return all(name in matched for name in configuration_names)
 
 def resolve_cubeide_builder():
     if os.path.isfile(DEFAULT_IDE):
@@ -197,8 +282,6 @@ def resolve_cubeide_builder():
 
     return max(candidates, key=version_key)
 
-
-# added by poimu
 def resolve_git_executable():
     git = shutil.which("git")
     if git:
@@ -217,6 +300,103 @@ def resolve_git_executable():
 
     raise ValueError("Git not found")
 
+def verify_bin_crc(bin_path):
+
+    if not os.path.isfile(bin_path):
+        raise ValueError("Binary file not found")
+
+    with open(bin_path, "rb") as source:
+        data = source.read()
+
+    if len(data) < 2:
+        return False, False, None, None
+
+    stored_crc = int.from_bytes(data[-2:], byteorder="little")
+    payload = data[:-2]
+
+    if not os.path.isfile(DEFAULT_CRC):
+        raise ValueError("CRC generator main.exe not found")
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".bin",
+        ) as temp:
+            temp.write(payload)
+            temp_path = temp.name
+
+        calculated_crc = int(
+            subprocess.check_output(
+                [DEFAULT_CRC, temp_path],
+                text=True,
+                creationflags=hidden_flags(),
+            ).strip()
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    valid = stored_crc == calculated_crc
+    return valid, valid, stored_crc, calculated_crc
+
+def extract_error_entries(text):
+
+    primary = []
+    fallback = []
+    seen = set()
+
+    for raw_line in text.splitlines():
+        line = ANSI.sub("", raw_line).strip()
+        if not line:
+            continue
+
+        lower = line.lower()
+        if "warning:" in lower:
+            continue
+
+        match = re.search(r"\berror:\s*(.+)$", line, re.IGNORECASE)
+        if match:
+            title = match.group(1).strip()
+            key = ("primary", line)
+            if key not in seen:
+                seen.add(key)
+                primary.append((title, line))
+            continue
+
+        if "undefined reference to" in lower:
+            title = line[line.lower().find("undefined reference to"):].strip()
+            key = ("primary", line)
+            if key not in seen:
+                seen.add(key)
+                primary.append((title, line))
+            continue
+
+        fallback_patterns = (
+            "build failed",
+            "hex merge failed",
+            "crc verification failed",
+            "failed configurations:",
+        )
+        if any(pattern in lower for pattern in fallback_patterns):
+            key = ("fallback", line)
+            if key not in seen:
+                seen.add(key)
+                fallback.append((line, line))
+
+    return primary if primary else fallback
+
+def read_build_error_entries(log_path):
+    if not os.path.isfile(log_path):
+        return []
+
+    with open(
+        log_path,
+        "r",
+        encoding="utf-8",
+        errors="replace",
+    ) as build_log:
+        return extract_error_entries(build_log.read())
 
 class HelpBuilderGUI(tk.Tk):
     BG = "#090909"
@@ -241,18 +421,32 @@ class HelpBuilderGUI(tk.Tk):
         self.workspace = tk.StringVar(value=DEFAULT_WORKSPACE)
         self.select_configurations = tk.BooleanVar(value=False)
         self.create_hex = tk.BooleanVar(value=False)
+
+        self.revision_profile = tk.StringVar(value="51+")
+
         self.status = tk.StringVar(value="Ready")
         self.percent = tk.DoubleVar(value=0)
 
         self.configuration_vars = {}
         self.configuration_rows = {}
+
+        self.configuration_selection_cache = {}
+        self.preprocessor_selection_cache = {}
+
+        self.preprocessor_rows = {}
+        self.preprocessor_vars = {}
+        self.revision_controls = []
+        self.configuration_action_buttons = []
+        self.create_hex_control = None
+
         self.workspace_refresh_job = None
 
         self.process = None
         self.events = queue.Queue()
         self.cancelled = False
 
-        # GUI added by poimu
+        self.error_entries = []
+
         self.release_info = ""
 
         self._configure_style()
@@ -330,6 +524,19 @@ class HelpBuilderGUI(tk.Tk):
             fg=self.MUTED,
             font=("Segoe UI", 9),
         ).pack(anchor="w", pady=(1, 0))
+
+        tk.Button(
+            header,
+            text="CRC TOOL",
+            command=self.open_crc_tool,
+            bg=self.BUTTON,
+            fg=self.MUTED,
+            activebackground="#303030",
+            activeforeground=self.TEXT,
+            relief="flat",
+            bd=0,
+            padx=10,
+        ).pack(side="right", anchor="e")
 
         self.build_workspace_panel()
         self.build_options_panel()
@@ -436,23 +643,46 @@ class HelpBuilderGUI(tk.Tk):
         mode = tk.Frame(panel, bg=self.PANEL)
         mode.grid(row=1, column=0, sticky="ew", padx=10)
 
-        ttk.Radiobutton(
+        ttk.Checkbutton(
             mode,
-            text="Auto · original six FC22 configurations",
+            text="Bulper Base Build",
             variable=self.select_configurations,
-            value=False,
+            onvalue=False,
+            offvalue=True,
             command=self.update_configuration_state,
-            style="Dark.TRadiobutton",
+            style="Dark.TCheckbutton",
         ).pack(anchor="w", pady=1)
 
-        ttk.Radiobutton(
-            mode,
-            text="Select build configurations",
-            variable=self.select_configurations,
-            value=True,
-            command=self.update_configuration_state,
+        revision_frame = tk.Frame(mode, bg=self.PANEL)
+        revision_frame.pack(fill="x", anchor="w", pady=(7, 1))
+
+        tk.Label(
+            revision_frame,
+            text="Release revision:",
+            bg=self.PANEL,
+            fg=self.MUTED,
+            font=("Segoe UI", 9),
+        ).pack(side="left")
+
+        revision_50 = ttk.Radiobutton(
+            revision_frame,
+            text="50",
+            variable=self.revision_profile,
+            value="50",
             style="Dark.TRadiobutton",
-        ).pack(anchor="w", pady=1)
+        )
+        revision_50.pack(side="left", padx=(8, 0))
+
+        revision_51 = ttk.Radiobutton(
+            revision_frame,
+            text="51+",
+            variable=self.revision_profile,
+            value="51+",
+            style="Dark.TRadiobutton",
+        )
+        revision_51.pack(side="left", padx=(8, 0))
+
+        self.revision_controls = [revision_50, revision_51]
 
         tk.Frame(
             panel,
@@ -476,35 +706,11 @@ class HelpBuilderGUI(tk.Tk):
 
         tk.Label(
             header,
-            text="Build configurations",
+            text="Preprocessor defines",
             bg=self.PANEL,
             fg=self.TEXT,
             font=("Segoe UI Semibold", 9),
         ).pack(side="left")
-
-        tk.Button(
-            header,
-            text="All",
-            command=self.select_all,
-            bg=self.PANEL,
-            fg=self.MUTED,
-            activebackground=self.PANEL,
-            activeforeground=self.TEXT,
-            relief="flat",
-            bd=0,
-        ).pack(side="right")
-
-        tk.Button(
-            header,
-            text="None",
-            command=self.select_none,
-            bg=self.PANEL,
-            fg=self.MUTED,
-            activebackground=self.PANEL,
-            activeforeground=self.TEXT,
-            relief="flat",
-            bd=0,
-        ).pack(side="right", padx=(0, 8))
 
         shell = tk.Frame(panel, bg=self.PANEL)
         shell.grid(
@@ -568,6 +774,22 @@ class HelpBuilderGUI(tk.Tk):
             ),
         )
 
+        self.bind_all(
+            "<MouseWheel>",
+            self._on_preprocessor_mousewheel,
+            add="+",
+        )
+        self.bind_all(
+            "<Button-4>",
+            self._on_preprocessor_mousewheel,
+            add="+",
+        )
+        self.bind_all(
+            "<Button-5>",
+            self._on_preprocessor_mousewheel,
+            add="+",
+        )
+
         tk.Frame(
             panel,
             height=1,
@@ -580,18 +802,21 @@ class HelpBuilderGUI(tk.Tk):
             pady=(2, 8),
         )
 
-        ttk.Checkbutton(
+        self.create_hex_control = ttk.Checkbutton(
             panel,
             text="Create programmer Firmware.hex",
             variable=self.create_hex,
             style="Dark.TCheckbutton",
-        ).grid(
+        )
+        self.create_hex_control.grid(
             row=6,
             column=0,
             sticky="w",
             padx=12,
             pady=(0, 11),
         )
+
+        self.update_configuration_state()
 
     def build_footer(self):
         footer = tk.Frame(self, bg=self.BG)
@@ -666,6 +891,27 @@ class HelpBuilderGUI(tk.Tk):
             ipady=9,
         )
 
+        self.log_button = tk.Button(
+            footer,
+            text="log+",
+            command=self.open_error_log,
+            bg=self.BG,
+            fg=self.MUTED,
+            activebackground=self.BG,
+            activeforeground=self.TEXT,
+            relief="flat",
+            bd=0,
+            font=("Consolas", 8),
+            padx=5,
+            pady=1,
+        )
+        self.log_button.grid(
+            row=3,
+            column=0,
+            sticky="e",
+            pady=(4, 0),
+        )
+
     def choose_workspace(self):
         selected = filedialog.askdirectory(
             title="Select STM32CubeIDE workspace",
@@ -685,12 +931,29 @@ class HelpBuilderGUI(tk.Tk):
     def refresh_workspace(self):
         self.workspace_refresh_job = None
 
+        self.configuration_selection_cache.update({
+            name: bool(variable.get())
+            for name, variable in self.configuration_vars.items()
+        })
+        self.preprocessor_selection_cache.update({
+            name: bool(variable.get())
+            for name, variable in self.preprocessor_vars.items()
+        })
+        previous_configurations = dict(
+            self.configuration_selection_cache
+        )
+        previous_preprocessors = dict(
+            self.preprocessor_selection_cache
+        )
+
         try:
             workspace, project_dir, project_name = (
                 resolve_workspace_project(self.workspace.get())
             )
             configurations = read_cproject(project_dir)
-            resolve_version_file(project_dir)
+
+            version_file = resolve_version_file(project_dir)
+            version_preprocessors = read_version_preprocessors(version_file)
 
             try:
                 git = resolve_git_executable()
@@ -713,6 +976,7 @@ class HelpBuilderGUI(tk.Tk):
 
         except Exception:
             configurations = {}
+            version_preprocessors = []
             self.status.set("Workspace incomplete")
 
         for widget in self.pre_frame.winfo_children():
@@ -721,29 +985,100 @@ class HelpBuilderGUI(tk.Tk):
         self.configuration_vars.clear()
         self.configuration_rows.clear()
 
-        # removed by poimu
-        # Non-FC22 configurations were previously display-only.
+        self.preprocessor_rows.clear()
+        self.configuration_action_buttons.clear()
 
-        # removed by poimu
-        # Every real .cproject Build Configuration was previously selectable.
+        self.preprocessor_vars.clear()
 
-        # added by poimu
-        # The locked backend supports the production FC22 configurations only.
-        # Preprocessor symbols are displayed as information only.
         fc22_configurations = {
             name: symbols
             for name, symbols in configurations.items()
             if name in VARIATION_LIST
         }
 
+        unique_symbols = list(version_preprocessors)
+
+        if unique_symbols:
+            for symbol in unique_symbols:
+                variable = tk.BooleanVar(
+                    value=previous_preprocessors.get(symbol, False)
+                )
+                self.preprocessor_vars[symbol] = variable
+                row = ttk.Checkbutton(
+                    self.pre_frame,
+                    text=f"-D{symbol}",
+                    variable=variable,
+                    style="Dark.TCheckbutton",
+                )
+                row.pack(fill="x", anchor="w", pady=1)
+                self.preprocessor_rows[symbol] = row
+        else:
+            tk.Label(
+                self.pre_frame,
+                text="No preprocessor defines found",
+                bg=self.PANEL,
+                fg=self.MUTED,
+                font=("Segoe UI", 9),
+            ).pack(anchor="w", pady=2)
+
+        config_header = tk.Frame(self.pre_frame, bg=self.PANEL)
+        config_header.pack(
+            fill="x",
+            anchor="w",
+            pady=(10, 3),
+        )
+
+        tk.Label(
+            config_header,
+            text="Build configurations",
+            bg=self.PANEL,
+            fg=self.TEXT,
+            font=("Segoe UI Semibold", 9),
+        ).pack(side="left")
+
+        all_button = tk.Button(
+            config_header,
+            text="All",
+            command=self.select_all,
+            bg=self.PANEL,
+            fg=self.MUTED,
+            activebackground=self.PANEL,
+            activeforeground=self.TEXT,
+            relief="flat",
+            bd=0,
+        )
+        all_button.pack(side="right")
+
+        none_button = tk.Button(
+            config_header,
+            text="None",
+            command=self.select_none,
+            bg=self.PANEL,
+            fg=self.MUTED,
+            activebackground=self.PANEL,
+            activeforeground=self.TEXT,
+            relief="flat",
+            bd=0,
+        )
+        none_button.pack(side="right", padx=(0, 8))
+
+        self.configuration_action_buttons = [all_button, none_button]
+
         for configuration, symbols in fc22_configurations.items():
-            variable = tk.BooleanVar(value=True)
+
+            variable = tk.BooleanVar(
+                value=previous_configurations.get(configuration, True)
+            )
             self.configuration_vars[configuration] = variable
 
-            text = ", ".join(symbols) if symbols else "no defined symbols"
+            configuration_text = (
+                ", ".join(symbols)
+                if symbols
+                else "no defined symbols"
+            )
             row = ttk.Checkbutton(
                 self.pre_frame,
-                text=f"{configuration}   ·   {text}",
+                text=f"{configuration}   ·   {configuration_text}",
                 variable=variable,
                 style="Dark.TCheckbutton",
             )
@@ -762,11 +1097,53 @@ class HelpBuilderGUI(tk.Tk):
         self.update_configuration_state()
 
     def update_configuration_state(self):
-        enabled = self.select_configurations.get()
+        manual_mode = self.select_configurations.get()
+
+        state = ["!disabled"] if manual_mode else ["disabled"]
+
+        for control in self.revision_controls:
+            control.state(state)
+
+        for row in self.preprocessor_rows.values():
+            row.state(state)
+
         for row in self.configuration_rows.values():
-            row.state(
-                ["!disabled"] if enabled else ["disabled"]
+            row.state(state)
+
+        for button in self.configuration_action_buttons:
+            button.configure(
+                state="normal" if manual_mode else "disabled"
             )
+
+        if self.create_hex_control is not None:
+            self.create_hex_control.state(state)
+
+    def _on_preprocessor_mousewheel(self, event):
+        if not hasattr(self, "pre_canvas"):
+            return
+
+        x = self.winfo_pointerx()
+        y = self.winfo_pointery()
+        left = self.pre_canvas.winfo_rootx()
+        top = self.pre_canvas.winfo_rooty()
+        right = left + self.pre_canvas.winfo_width()
+        bottom = top + self.pre_canvas.winfo_height()
+
+        if not (left <= x <= right and top <= y <= bottom):
+            return
+
+        if getattr(event, "num", None) == 4:
+            units = -1
+        elif getattr(event, "num", None) == 5:
+            units = 1
+        else:
+            delta = getattr(event, "delta", 0)
+            if not delta:
+                return
+            units = -1 if delta > 0 else 1
+
+        self.pre_canvas.yview_scroll(units, "units")
+        return "break"
 
     def select_all(self):
         for variable in self.configuration_vars.values():
@@ -788,6 +1165,17 @@ class HelpBuilderGUI(tk.Tk):
         if not selected:
             raise ValueError("Select a build configuration")
         return selected
+
+    def selected_preprocessors(self):
+
+        if not self.select_configurations.get():
+            return []
+
+        return [
+            name
+            for name, variable in self.preprocessor_vars.items()
+            if variable.get()
+        ]
 
     def set_progress(self, value, text):
         value = max(0, min(100, float(value)))
@@ -832,10 +1220,6 @@ class HelpBuilderGUI(tk.Tk):
         ide = resolve_cubeide_builder()
         configurations = read_cproject(project_dir)
 
-        # added by poimu
-        # Only availability/repository presence is checked here.
-        # Workspace cleanliness remains exclusively the strict stash -u check
-        # inside bulper_poimu_final.py.
         git = resolve_git_executable()
 
         if subprocess.run(
@@ -846,10 +1230,6 @@ class HelpBuilderGUI(tk.Tk):
             creationflags=hidden_flags(),
         ).returncode != 0:
             raise ValueError("Git repository not found")
-
-        # removed by poimu
-        # Base mode no longer blocks the GUI only because FC22 configuration
-        # names are absent. Generic workspaces can use their real configurations.
 
         relative_version = os.path.relpath(
             version_file,
@@ -866,11 +1246,6 @@ class HelpBuilderGUI(tk.Tk):
             "-v",
             relative_version,
 
-            # added by poimu
-            # versions.h has one release REVISION; select that exact first token.
-            "-b",
-            "1",
-
             "--workspace",
             workspace.replace("\\", "/"),
             "--project-name",
@@ -878,23 +1253,31 @@ class HelpBuilderGUI(tk.Tk):
             "--ide",
             ide,
 
-            # added by poimu
             "--git",
             git,
-
-            # GUI added by poimu
-            # Enables the backend's GUI-only interface without changing
-            # standalone backend behavior.
-            "--gui-application",
         ]
 
         selected = self.selected_configurations()
 
-        # removed by poimu
-        # Base mode previously fell back to arbitrary non-FC22 configurations.
+        if self.select_configurations.get():
+            command += [
+                "--revision-profile",
+                self.revision_profile.get(),
+            ]
+        else:
+            command += ["-b", "1"]
 
-        # added by poimu
-        # Auto mode preserves the locked backend's exact six FC22 variations.
+        selected_preprocessors = self.selected_preprocessors()
+
+        if (
+            selected_preprocessors
+            and not project_uses_user_cflags(project_dir, selected)
+        ):
+            raise ValueError(
+                "USER_CFLAGS must be configured for both C and C++ "
+                "in every selected CubeIDE configuration"
+            )
+
         production_base = all(
             name in configurations
             for name in VARIATION_LIST
@@ -912,7 +1295,10 @@ class HelpBuilderGUI(tk.Tk):
         for configuration in selected:
             command += ["--configuration", configuration]
 
-        if self.create_hex.get():
+        for symbol in selected_preprocessors:
+            command += ["--define", symbol]
+
+        if self.select_configurations.get() and self.create_hex.get():
             command.append("--create-programmer-hex")
 
         return command
@@ -922,7 +1308,7 @@ class HelpBuilderGUI(tk.Tk):
             return
 
         try:
-            self.refresh_workspace()
+
             command = self.build_command()
         except Exception as exc:
             messagebox.showwarning(
@@ -931,11 +1317,13 @@ class HelpBuilderGUI(tk.Tk):
             )
             return
 
+        self.release_info = ""
+
         self.set_progress(0, "Starting")
         self.build_button.config(state="disabled")
         self.cancelled = False
-        # GUI added by poimu
-        self.release_info = ""
+
+        self.error_entries = []
 
         threading.Thread(
             target=self.run_backend,
@@ -1023,16 +1411,17 @@ class HelpBuilderGUI(tk.Tk):
                     self.set_progress(event[1], event[2])
 
                 elif kind == "version":
-                    # GUI added by poimu
+
                     self.release_info = (
                         f"Revision {event[1]} · {event[2]}"
                     )
                     self.status.set(self.release_info)
 
                 elif kind == "confirm":
+
                     ok = messagebox.askyesno(
-                        "Fartak Control",
-                        f"{self.release_info or self.status.get()}\n\nContinue?"
+                        "Fartak Control - Confirm Build",
+                        f"{self.release_info or self.status.get()}\n\nContinue build?"
                     )
                     self.cancelled = not ok
                     try:
@@ -1048,11 +1437,8 @@ class HelpBuilderGUI(tk.Tk):
 
                 elif kind == "error":
                     self.build_button.config(state="normal")
-                    self.set_progress(0, "Failed")
-                    messagebox.showerror(
-                        "Fartak Control",
-                        event[1],
-                    )
+                    self.error_entries = [(event[1], event[1])]
+                    self.set_progress(0, f"Error: {event[1]}")
 
                 elif kind == "done":
                     _, return_code, recent = event
@@ -1062,18 +1448,374 @@ class HelpBuilderGUI(tk.Tk):
                         self.set_progress(0, "Cancelled")
                     elif return_code == 0:
                         self.set_progress(100, "Release completed")
-                    else:
-                        self.set_progress(0, "Failed")
-                        messagebox.showerror(
+
+                        messagebox.showinfo(
                             "Fartak Control",
-                            "\n".join(recent[-4:])
-                            or f"Exit code: {return_code}",
+                            "CRC presence and validity were verified.",
                         )
+
+                    else:
+                        log_path = os.path.join(
+                            os.path.dirname(BACKEND),
+                            "bulper_build.log",
+                        )
+                        self.error_entries = read_build_error_entries(
+                            log_path
+                        )
+
+                        backend_errors = extract_error_entries(
+                            "\n".join(recent)
+                        )
+                        known_lines = {
+                            full_line
+                            for _, full_line in self.error_entries
+                        }
+                        for entry in backend_errors:
+                            if entry[1] not in known_lines:
+                                self.error_entries.append(entry)
+                                known_lines.add(entry[1])
+
+                        if not self.error_entries:
+                            self.error_entries = [
+                                (
+
+                                    "Build failed",
+                                    "Build failed",
+                                )
+                            ]
+
+                        error_title = self.error_entries[0][0]
+                        self.set_progress(0, f"Error: {error_title}")
 
         except queue.Empty:
             pass
 
         self.after(60, self.poll_events)
+
+    def open_error_log(self):
+        window = tk.Toplevel(self)
+        window.title("Fartak Control - Error Log")
+        window.geometry("650x330")
+        window.minsize(520, 260)
+        window.configure(bg=self.BG)
+        window.transient(self)
+
+        panel = tk.Frame(
+            window,
+            bg=self.PANEL,
+            highlightbackground=self.BORDER,
+            highlightthickness=1,
+        )
+        panel.pack(
+            fill="both",
+            expand=True,
+            padx=18,
+            pady=18,
+        )
+        panel.grid_columnconfigure(0, weight=1)
+        panel.grid_rowconfigure(2, weight=1)
+
+        tk.Label(
+            panel,
+            text="ERROR LOG",
+            bg=self.PANEL,
+            fg=self.TEXT,
+            font=("Segoe UI Semibold", 13),
+        ).grid(
+            row=0,
+            column=0,
+            sticky="w",
+            padx=12,
+            pady=(12, 2),
+        )
+
+        tk.Label(
+            panel,
+
+            text="Errors only",
+            bg=self.PANEL,
+            fg=self.MUTED,
+            font=("Segoe UI", 9),
+        ).grid(
+            row=1,
+            column=0,
+            sticky="w",
+            padx=12,
+            pady=(0, 8),
+        )
+
+        text_frame = tk.Frame(panel, bg=self.PANEL)
+        text_frame.grid(
+            row=2,
+            column=0,
+            sticky="nsew",
+            padx=12,
+            pady=(0, 12),
+        )
+        text_frame.grid_columnconfigure(0, weight=1)
+        text_frame.grid_rowconfigure(0, weight=1)
+
+        error_text = tk.Text(
+            text_frame,
+            bg=self.BG,
+            fg=self.TEXT,
+            insertbackground=self.TEXT,
+            relief="flat",
+            bd=0,
+            wrap="word",
+            font=("Consolas", 9),
+            padx=9,
+            pady=9,
+        )
+        error_text.grid(
+            row=0,
+            column=0,
+            sticky="nsew",
+        )
+
+        scrollbar = ttk.Scrollbar(
+            text_frame,
+            orient="vertical",
+            command=error_text.yview,
+        )
+        scrollbar.grid(
+            row=0,
+            column=1,
+            sticky="ns",
+        )
+        error_text.configure(
+            yscrollcommand=scrollbar.set
+        )
+
+        entries = self.error_entries
+        if not entries:
+            log_path = os.path.join(
+                os.path.dirname(BACKEND),
+                "bulper_build.log",
+            )
+            entries = read_build_error_entries(log_path)
+
+        if entries:
+            for index, (_, full_line) in enumerate(entries, start=1):
+                error_text.insert(
+                    "end",
+                    f"{index}. {full_line}\n\n",
+                )
+        else:
+            error_text.insert(
+                "end",
+                "No build errors recorded.",
+            )
+
+        error_text.config(state="disabled")
+
+    def open_crc_tool(self):
+        window = tk.Toplevel(self)
+        window.title("Fartak Control - CRC Tool")
+        window.geometry("520x265")
+        window.minsize(470, 240)
+        window.configure(bg=self.BG)
+        window.transient(self)
+
+        file_path = tk.StringVar()
+        crc_status = tk.StringVar(value="Select a .bin file")
+        present_status = tk.StringVar(value="CRC detected: —")
+        valid_status = tk.StringVar(value="CRC valid: —")
+
+        panel = tk.Frame(
+            window,
+            bg=self.PANEL,
+            highlightbackground=self.BORDER,
+            highlightthickness=1,
+        )
+        panel.pack(fill="both", expand=True, padx=18, pady=18)
+        panel.grid_columnconfigure(0, weight=1)
+
+        tk.Label(
+            panel,
+            text="CRC CHECK",
+            bg=self.PANEL,
+            fg=self.TEXT,
+            font=("Segoe UI Semibold", 13),
+        ).grid(
+            row=0,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            padx=12,
+            pady=(12, 3),
+        )
+
+        tk.Label(
+            panel,
+            text="Verify the appended 16-bit CRC of an update .bin file",
+            bg=self.PANEL,
+            fg=self.MUTED,
+            font=("Segoe UI", 9),
+        ).grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            padx=12,
+            pady=(0, 10),
+        )
+
+        entry = tk.Entry(
+            panel,
+            textvariable=file_path,
+            bg=self.BG,
+            fg=self.TEXT,
+            insertbackground=self.TEXT,
+            relief="flat",
+            bd=0,
+            font=("Consolas", 9),
+        )
+        entry.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            padx=(12, 8),
+            pady=(0, 10),
+            ipady=7,
+        )
+
+        def choose_file():
+            selected = filedialog.askopenfilename(
+                title="Select update.bin",
+                filetypes=[
+                    ("Binary files", "*.bin"),
+                    ("All files", "*.*"),
+                ],
+            )
+            if selected:
+                file_path.set(selected.replace("\\", "/"))
+                crc_status.set("Ready to verify")
+                present_status.set("CRC detected: —")
+                valid_status.set("CRC valid: —")
+
+        def verify_file():
+            path = file_path.get().strip()
+            if not path:
+                messagebox.showwarning(
+                    "Fartak Control",
+                    "Select a .bin file",
+                    parent=window,
+                )
+                return
+
+            try:
+                present, valid, stored_crc, calculated_crc = (
+                    verify_bin_crc(path)
+                )
+            except Exception as exc:
+                present_status.set("CRC detected: ✕")
+                valid_status.set("CRC valid: ✕")
+                crc_status.set(str(exc))
+                return
+
+            present_status.set(
+                "CRC detected: ✓" if present else "CRC detected: ✕"
+            )
+            valid_status.set(
+                "CRC valid: ✓" if valid else "CRC valid: ✕"
+            )
+
+            if valid:
+                crc_status.set(
+                    f"CRC OK · stored {stored_crc} · calculated {calculated_crc}"
+                )
+            else:
+                crc_status.set(
+                    f"CRC mismatch · stored {stored_crc} · "
+                    f"calculated {calculated_crc}"
+                )
+
+        tk.Button(
+            panel,
+            text="Browse",
+            command=choose_file,
+            bg=self.BUTTON,
+            fg=self.TEXT,
+            activebackground="#303030",
+            activeforeground=self.TEXT,
+            relief="flat",
+            bd=0,
+            padx=12,
+        ).grid(
+            row=2,
+            column=1,
+            padx=(0, 12),
+            pady=(0, 10),
+            ipady=4,
+        )
+
+        tk.Label(
+            panel,
+            textvariable=present_status,
+            bg=self.PANEL,
+            fg=self.TEXT,
+            font=("Segoe UI", 9),
+        ).grid(
+            row=3,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            padx=12,
+            pady=(2, 1),
+        )
+
+        tk.Label(
+            panel,
+            textvariable=valid_status,
+            bg=self.PANEL,
+            fg=self.TEXT,
+            font=("Segoe UI", 9),
+        ).grid(
+            row=4,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            padx=12,
+            pady=1,
+        )
+
+        tk.Label(
+            panel,
+            textvariable=crc_status,
+            bg=self.PANEL,
+            fg=self.MUTED,
+            font=("Consolas", 8),
+            anchor="w",
+        ).grid(
+            row=5,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            padx=12,
+            pady=(5, 8),
+        )
+
+        tk.Button(
+            panel,
+            text="VERIFY CRC",
+            command=verify_file,
+            bg=self.ACCENT,
+            fg=self.BG,
+            activebackground="#cfcfcf",
+            activeforeground=self.BG,
+            relief="flat",
+            bd=0,
+            font=("Segoe UI Semibold", 9),
+        ).grid(
+            row=6,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            padx=12,
+            pady=(0, 12),
+            ipady=7,
+        )
 
     def close_app(self):
         if (
@@ -1090,7 +1832,6 @@ class HelpBuilderGUI(tk.Tk):
             self.process.terminate()
 
         self.destroy()
-
 
 if __name__ == "__main__":
     HelpBuilderGUI().mainloop()
