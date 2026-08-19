@@ -163,55 +163,6 @@ def resolve_version_file(project_dir):
 
     raise ValueError("versions.h not found")
 
-def read_version_preprocessors(version_path):
-    with open(version_path, "r", encoding="utf-8", errors="replace") as source:
-        content = source.read()
-
-    guard_match = re.search(
-        r"(?m)^\s*#\s*ifndef\s+([A-Za-z_]\w*)\s*$"
-        r"\s*#\s*define\s+\1\b",
-        content,
-    )
-    guard = guard_match.group(1) if guard_match else None
-
-    symbols = []
-
-    def add_symbol(symbol):
-        if symbol != guard and symbol not in symbols:
-            symbols.append(symbol)
-
-    for line in content.splitlines():
-        match = re.match(
-            r"^\s*#\s*(?:ifdef|ifndef)\s+([A-Za-z_]\w*)\b",
-            line,
-        )
-        if match:
-            add_symbol(match.group(1))
-            continue
-
-        condition = re.match(r"^\s*#\s*(?:if|elif)\b(.*)", line)
-        if not condition:
-            continue
-
-        expression = re.split(r"//|/\*", condition.group(1), maxsplit=1)[0]
-        defined_symbols = re.findall(
-            r"\bdefined\s*(?:\(\s*([A-Za-z_]\w*)\s*\)|([A-Za-z_]\w*))",
-            expression,
-        )
-        if defined_symbols:
-            for parenthesized, bare in defined_symbols:
-                add_symbol(parenthesized or bare)
-            continue
-
-        simple = re.match(
-            r"^\s*!?\s*([A-Za-z_]\w*)\s*(?:$|//|/\*)",
-            expression,
-        )
-        if simple:
-            add_symbol(simple.group(1))
-
-    return symbols
-
 def project_uses_user_cflags(project_dir, configuration_names):
     tree = ET.parse(os.path.join(project_dir, ".cproject"))
     matched = set()
@@ -419,10 +370,9 @@ class HelpBuilderGUI(tk.Tk):
         self.configure(bg=self.BG)
 
         self.workspace = tk.StringVar(value=DEFAULT_WORKSPACE)
-        self.select_configurations = tk.BooleanVar(value=False)
         self.create_hex = tk.BooleanVar(value=False)
 
-        self.revision_profile = tk.StringVar(value="51+")
+        self.revision_value = tk.StringVar(value="")
 
         self.status = tk.StringVar(value="Ready")
         self.percent = tk.DoubleVar(value=0)
@@ -431,13 +381,6 @@ class HelpBuilderGUI(tk.Tk):
         self.configuration_rows = {}
 
         self.configuration_selection_cache = {}
-        self.preprocessor_selection_cache = {}
-
-        self.preprocessor_rows = {}
-        self.preprocessor_vars = {}
-        self.revision_controls = []
-        self.configuration_action_buttons = []
-        self.create_hex_control = None
 
         self.workspace_refresh_job = None
 
@@ -472,18 +415,6 @@ class HelpBuilderGUI(tk.Tk):
         )
         style.map(
             "Dark.TCheckbutton",
-            background=[("active", self.PANEL)],
-            foreground=[("active", self.TEXT)],
-        )
-
-        style.configure(
-            "Dark.TRadiobutton",
-            background=self.PANEL,
-            foreground=self.TEXT,
-            font=("Segoe UI", 9),
-        )
-        style.map(
-            "Dark.TRadiobutton",
             background=[("active", self.PANEL)],
             foreground=[("active", self.TEXT)],
         )
@@ -624,7 +555,7 @@ class HelpBuilderGUI(tk.Tk):
             pady=7,
         )
         panel.grid_columnconfigure(0, weight=1)
-        panel.grid_rowconfigure(4, weight=1)
+        panel.grid_rowconfigure(3, weight=1)
 
         tk.Label(
             panel,
@@ -643,46 +574,32 @@ class HelpBuilderGUI(tk.Tk):
         mode = tk.Frame(panel, bg=self.PANEL)
         mode.grid(row=1, column=0, sticky="ew", padx=10)
 
-        ttk.Checkbutton(
-            mode,
-            text="Bulper Base Build",
-            variable=self.select_configurations,
-            onvalue=False,
-            offvalue=True,
-            command=self.update_configuration_state,
-            style="Dark.TCheckbutton",
-        ).pack(anchor="w", pady=1)
-
         revision_frame = tk.Frame(mode, bg=self.PANEL)
-        revision_frame.pack(fill="x", anchor="w", pady=(7, 1))
+        revision_frame.pack(fill="x", anchor="w", pady=(1, 1))
 
         tk.Label(
             revision_frame,
-            text="Release revision:",
+            text="MANUAL REVISION INPUT",
             bg=self.PANEL,
             fg=self.MUTED,
             font=("Segoe UI", 9),
-        ).pack(side="left")
+        ).pack(anchor="w")
 
-        revision_50 = ttk.Radiobutton(
+        tk.Entry(
             revision_frame,
-            text="50",
-            variable=self.revision_profile,
-            value="50",
-            style="Dark.TRadiobutton",
+            textvariable=self.revision_value,
+            bg=self.BG,
+            fg=self.TEXT,
+            insertbackground=self.TEXT,
+            relief="flat",
+            bd=0,
+            font=("Consolas", 9),
+        ).pack(
+            fill="x",
+            anchor="w",
+            pady=(4, 0),
+            ipady=7,
         )
-        revision_50.pack(side="left", padx=(8, 0))
-
-        revision_51 = ttk.Radiobutton(
-            revision_frame,
-            text="51+",
-            variable=self.revision_profile,
-            value="51+",
-            style="Dark.TRadiobutton",
-        )
-        revision_51.pack(side="left", padx=(8, 0))
-
-        self.revision_controls = [revision_50, revision_51]
 
         tk.Frame(
             panel,
@@ -696,25 +613,9 @@ class HelpBuilderGUI(tk.Tk):
             pady=9,
         )
 
-        header = tk.Frame(panel, bg=self.PANEL)
-        header.grid(
-            row=3,
-            column=0,
-            sticky="ew",
-            padx=12,
-        )
-
-        tk.Label(
-            header,
-            text="Preprocessor defines",
-            bg=self.PANEL,
-            fg=self.TEXT,
-            font=("Segoe UI Semibold", 9),
-        ).pack(side="left")
-
         shell = tk.Frame(panel, bg=self.PANEL)
         shell.grid(
-            row=4,
+            row=3,
             column=0,
             sticky="nsew",
             padx=12,
@@ -766,12 +667,27 @@ class HelpBuilderGUI(tk.Tk):
                 scrollregion=self.pre_canvas.bbox("all")
             ),
         )
-        self.pre_canvas.bind(
-            "<Configure>",
-            lambda event: self.pre_canvas.itemconfigure(
+
+        def resize_pre_canvas(event):
+            self.pre_canvas.itemconfigure(
                 self.pre_window,
                 width=event.width,
-            ),
+            )
+            content_height = self.pre_frame.winfo_reqheight()
+            self.pre_canvas.configure(
+                scrollregion=(
+                    0,
+                    0,
+                    event.width,
+                    max(content_height, event.height),
+                )
+            )
+            if content_height <= event.height:
+                self.pre_canvas.yview_moveto(0)
+
+        self.pre_canvas.bind(
+            "<Configure>",
+            resize_pre_canvas,
         )
 
         self.bind_all(
@@ -795,28 +711,25 @@ class HelpBuilderGUI(tk.Tk):
             height=1,
             bg=self.BORDER,
         ).grid(
-            row=5,
+            row=4,
             column=0,
             sticky="ew",
             padx=12,
             pady=(2, 8),
         )
 
-        self.create_hex_control = ttk.Checkbutton(
+        ttk.Checkbutton(
             panel,
             text="Create programmer Firmware.hex",
             variable=self.create_hex,
             style="Dark.TCheckbutton",
-        )
-        self.create_hex_control.grid(
-            row=6,
+        ).grid(
+            row=5,
             column=0,
             sticky="w",
             padx=12,
             pady=(0, 11),
         )
-
-        self.update_configuration_state()
 
     def build_footer(self):
         footer = tk.Frame(self, bg=self.BG)
@@ -935,25 +848,16 @@ class HelpBuilderGUI(tk.Tk):
             name: bool(variable.get())
             for name, variable in self.configuration_vars.items()
         })
-        self.preprocessor_selection_cache.update({
-            name: bool(variable.get())
-            for name, variable in self.preprocessor_vars.items()
-        })
         previous_configurations = dict(
             self.configuration_selection_cache
         )
-        previous_preprocessors = dict(
-            self.preprocessor_selection_cache
-        )
 
         try:
-            workspace, project_dir, project_name = (
+            _, project_dir, project_name = (
                 resolve_workspace_project(self.workspace.get())
             )
             configurations = read_cproject(project_dir)
-
-            version_file = resolve_version_file(project_dir)
-            version_preprocessors = read_version_preprocessors(version_file)
+            resolve_version_file(project_dir)
 
             try:
                 git = resolve_git_executable()
@@ -976,7 +880,6 @@ class HelpBuilderGUI(tk.Tk):
 
         except Exception:
             configurations = {}
-            version_preprocessors = []
             self.status.set("Workspace incomplete")
 
         for widget in self.pre_frame.winfo_children():
@@ -985,47 +888,17 @@ class HelpBuilderGUI(tk.Tk):
         self.configuration_vars.clear()
         self.configuration_rows.clear()
 
-        self.preprocessor_rows.clear()
-        self.configuration_action_buttons.clear()
-
-        self.preprocessor_vars.clear()
-
         fc22_configurations = {
             name: symbols
             for name, symbols in configurations.items()
             if name in VARIATION_LIST
         }
 
-        unique_symbols = list(version_preprocessors)
-
-        if unique_symbols:
-            for symbol in unique_symbols:
-                variable = tk.BooleanVar(
-                    value=previous_preprocessors.get(symbol, False)
-                )
-                self.preprocessor_vars[symbol] = variable
-                row = ttk.Checkbutton(
-                    self.pre_frame,
-                    text=f"-D{symbol}",
-                    variable=variable,
-                    style="Dark.TCheckbutton",
-                )
-                row.pack(fill="x", anchor="w", pady=1)
-                self.preprocessor_rows[symbol] = row
-        else:
-            tk.Label(
-                self.pre_frame,
-                text="No preprocessor defines found",
-                bg=self.PANEL,
-                fg=self.MUTED,
-                font=("Segoe UI", 9),
-            ).pack(anchor="w", pady=2)
-
         config_header = tk.Frame(self.pre_frame, bg=self.PANEL)
         config_header.pack(
             fill="x",
             anchor="w",
-            pady=(10, 3),
+            pady=(0, 3),
         )
 
         tk.Label(
@@ -1036,7 +909,7 @@ class HelpBuilderGUI(tk.Tk):
             font=("Segoe UI Semibold", 9),
         ).pack(side="left")
 
-        all_button = tk.Button(
+        tk.Button(
             config_header,
             text="All",
             command=self.select_all,
@@ -1046,10 +919,9 @@ class HelpBuilderGUI(tk.Tk):
             activeforeground=self.TEXT,
             relief="flat",
             bd=0,
-        )
-        all_button.pack(side="right")
+        ).pack(side="right")
 
-        none_button = tk.Button(
+        tk.Button(
             config_header,
             text="None",
             command=self.select_none,
@@ -1059,13 +931,9 @@ class HelpBuilderGUI(tk.Tk):
             activeforeground=self.TEXT,
             relief="flat",
             bd=0,
-        )
-        none_button.pack(side="right", padx=(0, 8))
-
-        self.configuration_action_buttons = [all_button, none_button]
+        ).pack(side="right", padx=(0, 8))
 
         for configuration, symbols in fc22_configurations.items():
-
             variable = tk.BooleanVar(
                 value=previous_configurations.get(configuration, True)
             )
@@ -1094,30 +962,6 @@ class HelpBuilderGUI(tk.Tk):
                 font=("Segoe UI", 9),
             ).pack(anchor="w", pady=3)
 
-        self.update_configuration_state()
-
-    def update_configuration_state(self):
-        manual_mode = self.select_configurations.get()
-
-        state = ["!disabled"] if manual_mode else ["disabled"]
-
-        for control in self.revision_controls:
-            control.state(state)
-
-        for row in self.preprocessor_rows.values():
-            row.state(state)
-
-        for row in self.configuration_rows.values():
-            row.state(state)
-
-        for button in self.configuration_action_buttons:
-            button.configure(
-                state="normal" if manual_mode else "disabled"
-            )
-
-        if self.create_hex_control is not None:
-            self.create_hex_control.state(state)
-
     def _on_preprocessor_mousewheel(self, event):
         if not hasattr(self, "pre_canvas"):
             return
@@ -1131,6 +975,11 @@ class HelpBuilderGUI(tk.Tk):
 
         if not (left <= x <= right and top <= y <= bottom):
             return
+
+        content_height = self.pre_frame.winfo_reqheight()
+        if content_height <= self.pre_canvas.winfo_height():
+            self.pre_canvas.yview_moveto(0)
+            return "break"
 
         if getattr(event, "num", None) == 4:
             units = -1
@@ -1154,9 +1003,6 @@ class HelpBuilderGUI(tk.Tk):
             variable.set(False)
 
     def selected_configurations(self):
-        if not self.select_configurations.get():
-            return []
-
         selected = [
             name
             for name, variable in self.configuration_vars.items()
@@ -1165,17 +1011,6 @@ class HelpBuilderGUI(tk.Tk):
         if not selected:
             raise ValueError("Select a build configuration")
         return selected
-
-    def selected_preprocessors(self):
-
-        if not self.select_configurations.get():
-            return []
-
-        return [
-            name
-            for name, variable in self.preprocessor_vars.items()
-            if variable.get()
-        ]
 
     def set_progress(self, value, text):
         value = max(0, min(100, float(value)))
@@ -1237,6 +1072,29 @@ class HelpBuilderGUI(tk.Tk):
         ).replace("\\", "/")
         relative_version = "/" + relative_version
 
+        selected = self.selected_configurations()
+        missing = [name for name in selected if name not in configurations]
+        if missing:
+            raise ValueError(
+                "Missing build configurations: " + ", ".join(missing)
+            )
+
+        revision_value = self.revision_value.get().strip()
+        if not revision_value.isdigit():
+            raise ValueError(
+                "MANUAL REVISION INPUT must be a revision number"
+            )
+        if int(revision_value) < 50:
+            raise ValueError(
+                "MANUAL REVISION INPUT must be 50 or greater"
+            )
+
+        if not project_uses_user_cflags(project_dir, selected):
+            raise ValueError(
+                "USER_CFLAGS must be configured for both C and C++ "
+                "in every selected CubeIDE configuration"
+            )
+
         command = [
             self.python_exe(),
             "-u",
@@ -1245,60 +1103,22 @@ class HelpBuilderGUI(tk.Tk):
             project_dir.replace("\\", "/"),
             "-v",
             relative_version,
-
             "--workspace",
             workspace.replace("\\", "/"),
             "--project-name",
             project_name,
             "--ide",
             ide,
-
             "--git",
             git,
+            "--revision-value",
+            revision_value,
         ]
-
-        selected = self.selected_configurations()
-
-        if self.select_configurations.get():
-            command += [
-                "--revision-profile",
-                self.revision_profile.get(),
-            ]
-        else:
-            command += ["-b", "1"]
-
-        selected_preprocessors = self.selected_preprocessors()
-
-        if (
-            selected_preprocessors
-            and not project_uses_user_cflags(project_dir, selected)
-        ):
-            raise ValueError(
-                "USER_CFLAGS must be configured for both C and C++ "
-                "in every selected CubeIDE configuration"
-            )
-
-        production_base = all(
-            name in configurations
-            for name in VARIATION_LIST
-        )
-
-        if not self.select_configurations.get() and not production_base:
-            missing = [
-                name for name in VARIATION_LIST
-                if name not in configurations
-            ]
-            raise ValueError(
-                "Missing FC22 build configurations: " + ", ".join(missing)
-            )
 
         for configuration in selected:
             command += ["--configuration", configuration]
 
-        for symbol in selected_preprocessors:
-            command += ["--define", symbol]
-
-        if self.select_configurations.get() and self.create_hex.get():
+        if self.create_hex.get():
             command.append("--create-programmer-hex")
 
         return command
