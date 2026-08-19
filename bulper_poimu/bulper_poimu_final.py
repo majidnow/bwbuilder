@@ -3,6 +3,7 @@
 # C++: Project Properties > C/C++ Build > Settings > Tool Settings > MCU G++ Compiler > Miscellaneous > Other flags
 
 import argparse, subprocess, shutil, os
+import re
 
 #added by poimu Runs hex_merge.py.
 import sys
@@ -73,56 +74,113 @@ def verify_appended_crc(bin_path):
 
     return stored_crc == calculated_crc
 
-#added by poimu Resolves Revision profile.
-def resolve_revision_occurrence(version_path, revision_profile):
-
-    import re
-
+#added by poimu Resolves the MAIN_RELEASE Revision define.
+def resolve_revision_define_occurrence(version_path):
     with open(version_path, "r", encoding="utf-8") as version_file:
         content = version_file.read()
 
-    matches = list(
-        re.finditer(r"\bREVISION\b[^0-9\r\n]*([0-9]+)", content)
+    pattern = re.compile(
+        r"^(\s*#define\s+REVISION\s+)([0-9]+)([^\r\n]*)$"
     )
+    matches = []
+    main_release_matches = []
+    stack = []
 
-    candidates = []
-    for occurrence, match in enumerate(matches, start=1):
-        revision = int(match.group(1))
+    def condition_state(directive, expression):
+        expression = expression.strip()
+        if directive == "ifdef":
+            return expression == "MAIN_RELEASE"
+        if directive == "ifndef":
+            return False if expression == "MAIN_RELEASE" else None
+        if "MAIN_RELEASE" not in expression:
+            return None
+        compact = re.sub(r"\s+", "", expression)
+        if "!defined(MAIN_RELEASE)" in compact or compact.startswith("!MAIN_RELEASE"):
+            return False
+        return True
 
-        if revision_profile == "50" and revision == 50:
-            candidates.append((occurrence, revision))
-        elif revision_profile == "51+" and revision >= 51:
-            candidates.append((occurrence, revision))
-
-    if len(candidates) != 1:
-        raise ValueError(
-            f"Revision profile {revision_profile!r} matched "
-            f"{len(candidates)} REVISION entries"
+    for line in content.splitlines():
+        directive = re.match(
+            r"^\s*#\s*(ifdef|ifndef|if|elif|else|endif)\b(.*)$",
+            line,
         )
+        if directive:
+            kind = directive.group(1)
+            expression = directive.group(2)
+            if kind in ("ifdef", "ifndef", "if"):
+                state = condition_state(kind, expression)
+                stack.append([state, state is True])
+            elif kind == "elif" and stack:
+                previous_state, taken = stack[-1]
+                state = condition_state("if", expression)
+                if taken:
+                    state = False
+                stack[-1] = [state, taken or state is True]
+            elif kind == "else" and stack:
+                previous_state, taken = stack[-1]
+                state = None if previous_state is None else not taken
+                stack[-1] = [state, taken or state is True]
+            elif kind == "endif" and stack:
+                stack.pop()
+            continue
 
-    return candidates[0]
+        match = pattern.match(line)
+        if not match:
+            continue
+
+        matches.append(match)
+        states = [state for state, _ in stack if state is not None]
+        if states and all(states):
+            main_release_matches.append(len(matches))
+
+    if not matches:
+        raise ValueError("#define REVISION not found")
+    if len(matches) == 1:
+        return 1
+    if len(main_release_matches) == 1:
+        return main_release_matches[0]
+
+    current_release = [
+        occurrence
+        for occurrence, match in enumerate(matches, start=1)
+        if int(match.group(2)) >= 51
+    ]
+    if len(current_release) == 1:
+        return current_release[0]
+
+    raise ValueError("Unable to identify the MAIN_RELEASE REVISION define")
+
+
+def set_revision_define(version_path, occurrence, revision_value):
+    with open(version_path, "r+", encoding="utf-8") as version_file:
+        content = version_file.read()
+        matches = list(re.finditer(
+            r"(?m)^(\s*#define\s+REVISION\s+)([0-9]+)([^\r\n]*)$",
+            content,
+        ))
+        if occurrence < 1 or occurrence > len(matches):
+            raise ValueError("REVISION define occurrence not found")
+
+        match = matches[occurrence - 1]
+        updated = (
+            content[:match.start(2)]
+            + str(revision_value)
+            + content[match.end(2):]
+        )
+        version_file.seek(0)
+        version_file.write(updated)
+        version_file.truncate()
 
 parser = argparse.ArgumentParser(description='Build Helper')
 
 parser.add_argument('-d', action="store", dest='directory', default=BW_PROJECT_DIR, help='project directory')
 parser.add_argument('-v', action="store", dest='version', default=r"\BeachWolf\include\versions.h", help='file that contain version variables')
-parser.add_argument('-b', action="store", dest='build', default="12345678", help='which build version variable need to increase', type=int)
-
-#added by poimu Adds GUI build options.
-parser.add_argument(
-    '--revision-profile',
-    choices=['50', '51+'],
-    default=None
-)
-
+parser.add_argument('--revision-value', type=int, required=True)
 parser.add_argument('--workspace', default=None)
 parser.add_argument('--project-name', default=None)
 parser.add_argument('--ide', default=None)
 parser.add_argument('--git', default=None)
 parser.add_argument('--configuration', action='append', default=[])
-
-parser.add_argument('--define', action='append', default=[])
-
 parser.add_argument('--create-programmer-hex', action='store_true')
 
 args = parser.parse_args()
@@ -142,37 +200,15 @@ BUILD_LOG_PATH = os.path.join(os.getcwd(), "bulper_build.log")
 with open(BUILD_LOG_PATH, "wb"):
     pass
 
-#added by poimu Resolves selected Revision.
-if args.revision_profile:
-    try:
-        revision_path = args.directory + args.version
-        args.build, selected_revision_value = resolve_revision_occurrence(
-            revision_path,
-            args.revision_profile
-        )
-    except (OSError, ValueError) as exc:
-        with open(BUILD_LOG_PATH, "a", encoding="utf-8") as build_log:
-            build_log.write(f"Revision resolution failed: {exc}\n")
-        print("Build failed")
-        exit(1)
-else:
-    selected_revision_value = None
+if args.revision_value < 50:
+    with open(BUILD_LOG_PATH, "a", encoding="utf-8") as build_log:
+        build_log.write("Revision error: revision must be 50 or greater\n")
+    print("Build failed")
+    exit(1)
 
-#added by poimu Logs build options.
 with open(BUILD_LOG_PATH, "a", encoding="utf-8") as build_log:
     build_log.write(f"args.configuration = {args.configuration!r}\n")
-
-    build_log.write(f"args.define = {args.define!r}\n")
-
-    build_log.write(
-        f"args.revision_profile = {args.revision_profile!r}\n"
-    )
-    build_log.write(
-        f"revision_occurrence = {args.build!r}\n"
-    )
-    build_log.write(
-        f"selected_revision_value = {selected_revision_value!r}\n"
-    )
+    build_log.write(f"args.revision_value = {args.revision_value!r}\n")
 
 #added by poimu Reports startup.
 show_progress(0, "Starting")
@@ -195,13 +231,21 @@ show_progress(10, "Reading Git commit")
 
 hash = subprocess.check_output([GIT_EXECUTABLE, "describe", "--always"], cwd=args.directory).strip().decode()
 
-current_build_version = 0;
+current_build_version = args.revision_value;
 COMMIT_HASH_TOKEN = 'COMMIT_HASH'
-BUILD_VERSION_TOKEN = 'REVISION'
 VERSION_DIR = ""
+revision_path = args.directory + args.version
 
 #added by poimu Reports Revision read.
 show_progress(15, "Reading version")
+
+try:
+    revision_occurrence = resolve_revision_define_occurrence(revision_path)
+except (OSError, ValueError) as exc:
+    with open(BUILD_LOG_PATH, "a", encoding="utf-8") as build_log:
+        build_log.write(f"Revision error: {exc}\n")
+    print("Build failed")
+    exit(1)
 
 with open(args.directory+args.version, 'r+') as f:
    content = f.read()
@@ -217,26 +261,6 @@ with open(args.directory+args.version, 'r+') as f:
    f.write(content[0:start])
    f.write(str(f'"{hash}"'))
 
-   #added by poimu Uses selected Revision.
-   if selected_revision_value is not None:
-       current_build_version = selected_revision_value
-   else:
-       start = (
-           find_nth(
-               content[end:len(content)],
-               BUILD_VERSION_TOKEN,
-               args.build
-           )
-           + len(BUILD_VERSION_TOKEN)
-           + end
-       )
-       for c in content[start:start+20]:
-           if c >= '0' and c <= '9':
-               break
-           start += 1
-       end = content[start:start+10].find('\n') + start
-       current_build_version_str = content[start:end]
-       current_build_version = int(current_build_version_str)
    print(f"{RED}Build Version: {YELLOW}{current_build_version}, {RED}Commit Hash: {YELLOW}{hash}{RESET}")
    VERSION_DIR = f"{current_build_version}-{hash}"
 
@@ -253,15 +277,11 @@ print(f"{GREEN}Continuing...{RESET}")
 #added by poimu Reports build setup.
 show_progress(25, "Preparing build")
 
-#added by poimu Passes defines through USER_CFLAGS.
+#added by poimu Passes MAIN_RELEASE through USER_CFLAGS.
 env = os.environ.copy()
 env.pop("USER_CFLAGS", None)
-
-PREPROCESSOR_SYMBOLS = " ".join(
-    f"-D{symbol}" for symbol in args.define
-)
-if PREPROCESSOR_SYMBOLS:
-    env["USER_CFLAGS"] = PREPROCESSOR_SYMBOLS
+PREPROCESSOR_SYMBOLS = "-DMAIN_RELEASE"
+env["USER_CFLAGS"] = PREPROCESSOR_SYMBOLS
 
 #added by poimu Logs USER_CFLAGS.
 with open(BUILD_LOG_PATH, "a", encoding="utf-8") as build_log:
@@ -270,191 +290,237 @@ with open(BUILD_LOG_PATH, "a", encoding="utf-8") as build_log:
     )
 
 #added by poimu Validates selected configurations.
-ACTIVE_VARIATION_LIST = VARIATION_LIST
-if args.configuration:
-    if any(c not in VARIATION_LIST for c in args.configuration):
-        print("Build failed")
-        exit(1)
-    ACTIVE_VARIATION_LIST = list(dict.fromkeys(args.configuration))
+if not args.configuration:
+    print("Build failed")
+    with open(BUILD_LOG_PATH, "a", encoding="utf-8") as build_log:
+        build_log.write("No Build Configuration selected\n")
+    exit(1)
 
+if any(c not in VARIATION_LIST for c in args.configuration):
+    print("Build failed")
+    exit(1)
+
+ACTIVE_VARIATION_LIST = list(dict.fromkeys(args.configuration))
 ACTIVE_UPDATE_PATHES_LIST = [
     UPDATE_PATHES_LIST[VARIATION_LIST.index(c)] for c in ACTIVE_VARIATION_LIST
 ]
 
-#added by poimu Runs silent builds and logs compiler output.
-show_progress(30, "Building STM32 configurations")
+#added by poimu Runs the real Revision 50 build and the requested Revision build.
+PACKAGE_REVISIONS = [50]
+if current_build_version > 50:
+    PACKAGE_REVISIONS.append(current_build_version)
 
-with open(BUILD_LOG_PATH, "ab") as build_log:
+RELEASE_ROOT = f"{RELEAS_DIR}/{VERSION_DIR}"
+WL_RELEASE_PATH_V2 = WL_RELEASE_PATH
+WL_RELEASE_PATH_V1 = "D:/Storage/wolfloader/Archive/ver 1"
+STAGE_DIR = tempfile.mkdtemp(prefix="bulper_release_")
 
-    if args.configuration:
+_build_progress_start = 30
+_build_progress_end = 60
+_build_revision_count = len(PACKAGE_REVISIONS)
+_build_variation_count = len(ACTIVE_VARIATION_LIST)
 
-        for c in ACTIVE_VARIATION_LIST:
-            build_cmd = [
-                CDT_DIR, '-data', BW_WORKSPACE,
-            ]
+try:
+    show_progress(_build_progress_start, "Building STM32 configurations")
 
-            build_cmd += [
+    for _revision_index, package_revision in enumerate(PACKAGE_REVISIONS):
+        set_revision_define(
+            revision_path,
+            revision_occurrence,
+            package_revision,
+        )
 
-                '-cleanBuild', GUI_PROJECT_NAME+"/"+c
-            ]
+        _revision_progress_start = (
+            _build_progress_start
+            + (_build_progress_end - _build_progress_start)
+            * _revision_index // _build_revision_count
+        )
+        _revision_progress_end = (
+            _build_progress_start
+            + (_build_progress_end - _build_progress_start)
+            * (_revision_index + 1) // _build_revision_count
+        )
 
+        with open(BUILD_LOG_PATH, "ab") as build_log:
             build_log.write(
-                ("build_cmd = " + repr(build_cmd) + "\n").encode("utf-8")
+                (f"build_revision = {package_revision}\n").encode("utf-8")
             )
             build_log.flush()
 
-            result = subprocess.run(
-                build_cmd,
-                stdout=build_log,
-                stderr=subprocess.STDOUT,
-                text=False,
+            for _variation_index, c in enumerate(ACTIVE_VARIATION_LIST, start=1):
+                build_cmd = [
+                    CDT_DIR, '-data', BW_WORKSPACE,
+                    '-cleanBuild', GUI_PROJECT_NAME+"/"+c,
+                ]
 
-                env=env
+                build_log.write(
+                    ("build_cmd = " + repr(build_cmd) + "\n").encode("utf-8")
+                )
+                build_log.flush()
+
+                result = subprocess.run(
+                    build_cmd,
+                    stdout=build_log,
+                    stderr=subprocess.STDOUT,
+                    text=False,
+                    env=env,
+                )
+
+                if result.returncode > 0:
+                    print(f"Build failed: {c}", flush=True)
+                    exit(1)
+
+                src_dir = f"{BW_PROJECT_DIR}/{c}"
+                stage_dir = os.path.join(
+                    STAGE_DIR,
+                    str(package_revision),
+                    c,
+                )
+                os.makedirs(stage_dir, exist_ok=True)
+                shutil.copy(
+                    f"{src_dir}/BeachWolf.hex",
+                    f"{stage_dir}/BeachWolf.hex",
+                )
+                shutil.copy(
+                    f"{src_dir}/update.bin",
+                    f"{stage_dir}/update.bin",
+                )
+
+                show_progress(
+                    _revision_progress_start
+                    + int(
+                        (_revision_progress_end - _revision_progress_start)
+                        * _variation_index
+                        / max(1, _build_variation_count)
+                    ),
+                    f"Built {package_revision}/{c}",
+                )
+
+    show_progress(60, "Build completed")
+    show_progress(65, "Packaging WolfLoader")
+    show_progress(70, "Packaging variations")
+
+    _total_packages = len(PACKAGE_REVISIONS) * len(ACTIVE_VARIATION_LIST)
+    _packaged_items = 0
+
+    for package_revision in PACKAGE_REVISIONS:
+        RELEASE_PATH = f"{RELEASE_ROOT}/{package_revision}"
+        UPDATE_DIR = f"{RELEASE_PATH}/FC22-UPDATE"
+        package_wl_release_path = (
+            WL_RELEASE_PATH_V1
+            if package_revision == 50
+            else WL_RELEASE_PATH_V2
+        )
+
+        WL_DES_DIR = f"{RELEASE_PATH}/WolfLoader"
+        WL_PATH = f"{WL_DES_DIR}/WolfLoader.hex"
+        os.makedirs(WL_DES_DIR, exist_ok=True)
+        shutil.copy(
+            f"{package_wl_release_path}/WolfLoader.hex",
+            WL_PATH,
+        )
+        shutil.copy(
+            f"{package_wl_release_path}/update.bin",
+            f"{WL_DES_DIR}/update.bin",
+        )
+
+        crc = subprocess.check_output(
+            [CRC_GEN_PATH, f"{WL_DES_DIR}/update.bin"]
+        ).decode()
+        crc_bytes = int(crc).to_bytes(2, byteorder='little')
+        with open(f"{WL_DES_DIR}/update.bin", "ab") as update:
+            update.write(crc_bytes)
+
+        if not verify_appended_crc(f"{WL_DES_DIR}/update.bin"):
+            print("CRC verification failed: WolfLoader", flush=True)
+            exit(1)
+
+        wl_update_dir = f"{UPDATE_DIR}/{UPDATE_PATHES_LIST[-1]}"
+        os.makedirs(wl_update_dir, exist_ok=True)
+        shutil.copy(
+            f"{WL_DES_DIR}/update.bin",
+            f"{wl_update_dir}/update.bin",
+        )
+
+        for c, u in zip(ACTIVE_VARIATION_LIST, ACTIVE_UPDATE_PATHES_LIST):
+            src_dir = os.path.join(
+                STAGE_DIR,
+                str(package_revision),
+                c,
+            )
+            des_dir = f"{RELEASE_PATH}/{c}"
+
+            os.makedirs(des_dir, exist_ok=True)
+            shutil.copy(
+                f"{src_dir}/BeachWolf.hex",
+                f"{des_dir}/BeachWolf.hex",
+            )
+            shutil.copy(
+                f"{src_dir}/update.bin",
+                f"{des_dir}/update.bin",
             )
 
-            if result.returncode > 0:
-                print(f"Build failed: {c}", flush=True)
+            if CREATE_PROGRAMMER_HEX:
+                merge_script = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "hex_merge.py"
+                )
+                if not os.path.isfile(merge_script):
+                    print("HEX merge failed: hex_merge.py not found", flush=True)
+                    exit(1)
+                try:
+                    merge_result = subprocess.run(
+                        [
+                            sys.executable,
+                            merge_script,
+                            WL_PATH,
+                            f"{des_dir}/BeachWolf.hex",
+                            "-o",
+                            f"{des_dir}/Firmware.hex",
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                    )
+                except OSError as exc:
+                    print(f"HEX merge failed: {exc}", flush=True)
+                    exit(1)
+                if merge_result.returncode != 0:
+                    detail = merge_result.stdout.strip()
+                    print(detail or "HEX merge failed", flush=True)
+                    exit(1)
+
+            crc = subprocess.check_output(
+                [CRC_GEN_PATH, f"{des_dir}/update.bin"]
+            ).decode()
+            print(f"{package_revision}/{c} CRC: {crc}")
+            crc_bytes = int(crc).to_bytes(2, byteorder='little')
+            with open(f"{des_dir}/update.bin", "ab") as update:
+                update.write(crc_bytes)
+
+            if not verify_appended_crc(f"{des_dir}/update.bin"):
+                print(f"CRC verification failed: {c}", flush=True)
                 exit(1)
 
-    else:
-
-        build_cmd = [CDT_DIR, '-data', BW_WORKSPACE]
-
-        for c in VARIATION_LIST:
-            build_cmd.append("-cleanBuild")
-
-            build_cmd.append(GUI_PROJECT_NAME+"/"+c)
-
-        build_log.write(
-            ("build_cmd = " + repr(build_cmd) + "\n").encode("utf-8")
-        )
-        build_log.flush()
-
-        result = subprocess.run(
-            build_cmd,
-            stdout=build_log,
-            stderr=subprocess.STDOUT,
-            text=False,
-
-            env=env
-        )
-
-        if result.returncode > 0:
-            print("Build failed")
-            exit(1)
-
-#added by poimu Reports build completion.
-show_progress(60, "Build completed")
-
-RELEASE_PATH = f"{RELEAS_DIR}/{VERSION_DIR}"
-UPDATE_DIR = f"{RELEASE_PATH}/FC22-UPDATE"
-
-if current_build_version < 51:
-    WL_RELEASE_PATH="D:/Storage/wolfloader/Archive/ver 1"
-
-#added by poimu Reports WolfLoader packaging.
-show_progress(65, "Packaging WolfLoader")
-
-WL_DES_DIR = f"{RELEASE_PATH}/WolfLoader"
-WL_PATH = f"{WL_DES_DIR}/WolfLoader.hex"
-os.makedirs(WL_DES_DIR, exist_ok=True)
-shutil.copy(f"{WL_RELEASE_PATH}/WolfLoader.hex",
-            f"{WL_PATH}")
-shutil.copy(f"{WL_RELEASE_PATH}/update.bin",
-            f"{WL_DES_DIR}/update.bin")
-crc = subprocess.check_output([CRC_GEN_PATH, f"{WL_DES_DIR}/update.bin"]).decode()
-crc_bytes = int(crc).to_bytes(2, byteorder='little')
-with open(f"{WL_DES_DIR}/update.bin", "ab") as update:
-    update.write(crc_bytes)
-
-#added by poimu Verifies WolfLoader CRC.
-if not verify_appended_crc(f"{WL_DES_DIR}/update.bin"):
-    print("CRC verification failed: WolfLoader", flush=True)
-    exit(1)
-
-if current_build_version > 50:
-    wl_update_dir = f"{UPDATE_DIR}/{UPDATE_PATHES_LIST[-1]}"
-    os.makedirs(wl_update_dir, exist_ok=True)
-    shutil.copy(f"{WL_DES_DIR}/update.bin",
-                f"{wl_update_dir}/update.bin")
-
-#added by poimu Packages selected variations.
-show_progress(70, "Packaging variations")
-
-_total_variations = len(ACTIVE_VARIATION_LIST)
-
-for _variation_index, (c, u) in enumerate(
-    zip(ACTIVE_VARIATION_LIST, ACTIVE_UPDATE_PATHES_LIST),
-    start=1
-):
-    src_dir = f"{BW_PROJECT_DIR}/{c}"
-    des_dir = f"{RELEASE_PATH}/{c}"
-
-    os.makedirs(des_dir, exist_ok=True)
-    shutil.copy(f"{src_dir}/BeachWolf.hex",
-                f"{des_dir}/BeachWolf.hex")
-    shutil.copy(f"{src_dir}/update.bin",
-                f"{des_dir}/update.bin")
-
-    #added by poimu Creates Firmware.hex with hex_merge.py.
-    if CREATE_PROGRAMMER_HEX:
-        merge_script = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "hex_merge.py"
-        )
-        if not os.path.isfile(merge_script):
-            print("HEX merge failed: hex_merge.py not found", flush=True)
-            exit(1)
-        try:
-            merge_result = subprocess.run(
-                [
-                    sys.executable,
-                    merge_script,
-                    WL_PATH,
-                    f"{des_dir}/BeachWolf.hex",
-                    "-o",
-                    f"{des_dir}/Firmware.hex",
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
+            update_dir = f"{UPDATE_DIR}/{u}"
+            os.makedirs(update_dir, exist_ok=True)
+            shutil.copy(
+                f"{des_dir}/update.bin",
+                f"{update_dir}/update.bin",
             )
-        except OSError as exc:
-            print(f"HEX merge failed: {exc}", flush=True)
-            exit(1)
-        if merge_result.returncode != 0:
-            detail = merge_result.stdout.strip()
-            print(detail or "HEX merge failed", flush=True)
-            exit(1)
 
-    crc = subprocess.check_output([CRC_GEN_PATH, f"{des_dir}/update.bin"]).decode()
-    print(f"{c} CRC: {crc}")
-    crc_bytes = int(crc).to_bytes(2, byteorder='little')
-    with open(f"{des_dir}/update.bin", "ab") as update:
-        update.write(crc_bytes)
+            _packaged_items += 1
+            show_progress(
+                70 + int(28 * _packaged_items / max(1, _total_packages)),
+                f"Packaged {package_revision}/{c}",
+            )
 
-    #added by poimu Verifies variation CRC.
-    if not verify_appended_crc(f"{des_dir}/update.bin"):
-        print(f"CRC verification failed: {c}", flush=True)
-        exit(1)
-
-    if current_build_version > 50:
-        update_dir = f"{UPDATE_DIR}/{u}"
-        os.makedirs(update_dir, exist_ok=True)
-        shutil.copy(f"{des_dir}/update.bin",
-                    f"{update_dir}/update.bin")
-
-    #added by poimu Updates packaging progress.
-    _variation_progress = 70 + int(
-        28 * _variation_index / max(1, _total_variations)
+    print("CRC presence and validity were verified.", flush=True)
+    show_progress(100, "Release completed")
+finally:
+    set_revision_define(
+        revision_path,
+        revision_occurrence,
+        current_build_version,
     )
-    show_progress(
-        _variation_progress,
-        f"Packaged {c} ({_variation_index}/{_total_variations})"
-    )
-
-#added by poimu Reports CRC verification.
-print("CRC presence and validity were verified.", flush=True)
-
-#added by poimu Reports Release completion.
-show_progress(100, "Release completed")
+    shutil.rmtree(STAGE_DIR, ignore_errors=True)
