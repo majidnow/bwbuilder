@@ -312,7 +312,7 @@ if current_build_version > 50:
 
 RELEASE_ROOT = f"{RELEAS_DIR}/{VERSION_DIR}"
 WL_RELEASE_PATH_V2 = WL_RELEASE_PATH
-WL_RELEASE_PATH_V1 = "D:/Storage/wolfloader/Archive/ver 1"
+WL_RELEASE_PATH_V1 = WL_RELEASE_PATH_V2
 STAGE_DIR = tempfile.mkdtemp(prefix="bulper_release_")
 
 _build_progress_start = 30
