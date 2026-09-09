@@ -19,7 +19,7 @@ WL_RELEASE_PATH="D:/Storage/wolfloader/Archive/ver 2"
 CRC_GEN_PATH=r"D:\Storage\tools\crcc\main.exe"
 
 BW_PROJECT_DIR=BW_WORKSPACE+"/BeachWolf"
-// this line is changed!
+
 VARIATION_LIST=["FC22-01", "FC22-02", "FC22-02-LL", "FC22-03", "FC22R-01", "FC22R-02"]
 UPDATE_PATHES_LIST=["S-1", "S-2", "S-2-LL", "S-3", "AR-1", "AR-2", "BL"]
 
