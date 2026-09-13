@@ -10,7 +10,6 @@ import tempfile
 
 import threading
 import tkinter as tk
-from turtle import mode
 import xml.etree.ElementTree as ET
 from tkinter import filedialog, messagebox, ttk
 
