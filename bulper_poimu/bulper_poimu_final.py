@@ -520,29 +520,69 @@ try:
             )
 
 #ZIP CODE
-    ZIP_DIR = os.path.join(RELEAS_DIR, "zip")
-    os.makedirs(ZIP_DIR, exist_ok=True)
-
     for package_revision in PACKAGE_REVISIONS:
         release_path = os.path.join(
             RELEASE_ROOT,
             str(package_revision),
         )
 
-        for c, u in zip(
-            ACTIVE_VARIATION_LIST,
-            ACTIVE_UPDATE_PATHES_LIST,
-        ):
-            zip_path = os.path.join(
-                ZIP_DIR,
-                f"{package_revision}-{c}.zip",
+        update_root = os.path.join(
+            release_path,
+            "FC22-UPDATE",
+        )
+
+        if package_revision == 50:
+            legacy_zip = os.path.join(
+                release_path,
+                "FC22-UPDATE.zip",
             )
 
-            update_path = os.path.join(
+            if os.path.isfile(legacy_zip):
+                os.remove(legacy_zip)
+
+            for c in ACTIVE_VARIATION_LIST:
+                zip_path = os.path.join(
+                    release_path,
+                    f"{c}.zip",
+                )
+
+                configuration_update = os.path.join(
+                    release_path,
+                    c,
+                    "update.bin",
+                )
+
+                with zipfile.ZipFile(
+                    zip_path,
+                    "w",
+                    compression=zipfile.ZIP_DEFLATED,
+                ) as archive:
+                    archive.write(
+                        configuration_update,
+                        "update.bin",
+                    )
+
+                    for root, _, files in os.walk(update_root):
+                        for file_name in files:
+                            file_path = os.path.join(
+                                root,
+                                file_name,
+                            )
+
+                            relative_path = os.path.relpath(
+                                file_path,
+                                update_root,
+                            ).replace(os.sep, "/")
+
+                            archive.write(
+                                file_path,
+                                f"FC22-UPDATE/{relative_path}",
+                            )
+
+        else:
+            zip_path = os.path.join(
                 release_path,
-                "FC22-UPDATE",
-                u,
-                "update.bin",
+                "FC22-UPDATE.zip",
             )
 
             with zipfile.ZipFile(
@@ -550,23 +590,20 @@ try:
                 "w",
                 compression=zipfile.ZIP_DEFLATED,
             ) as archive:
+                for root, _, files in os.walk(update_root):
+                    for file_name in files:
+                        file_path = os.path.join(
+                            root,
+                            file_name,
+                        )
 
-                if package_revision == 50:
-                    configuration_update = os.path.join(
-                        release_path,
-                        c,
-                        "update.bin",
-                    )
-                    archive.write(
-                        configuration_update,
-                        "update.bin",
-                    )
-
-                archive.write(
-                    update_path,
-                    f"{u}/update.bin",
-                )
-            
+                        archive.write(
+                            file_path,
+                            os.path.relpath(
+                                file_path,
+                                update_root,
+                            ),
+                        )
 
     print("CRC presence and validity were verified.", flush=True)
     show_progress(100, "Release completed")
