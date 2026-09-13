@@ -10,6 +10,7 @@ import tempfile
 
 import threading
 import tkinter as tk
+from turtle import mode
 import xml.etree.ElementTree as ET
 from tkinter import filedialog, messagebox, ttk
 
@@ -162,7 +163,24 @@ def resolve_version_file(project_dir):
             return os.path.join(root, "versions.h")
 
     raise ValueError("versions.h not found")
+def read_latest_revision(version_path):
+    with open(version_path, "r", encoding="utf-8") as version_file:
+        content = version_file.read()
 
+    revisions = [
+        int(value)
+        for value in re.findall(
+            r"(?m)^\s*#define\s+REVISION\s+([0-9]+)",
+            content,
+        )
+    ]
+
+    revisions = [revision for revision in revisions if revision >= 50]
+
+    if not revisions:
+        raise ValueError("No REVISION 50 or greater found")
+
+    return max(revisions)
 def project_uses_user_cflags(project_dir, configuration_names):
     tree = ET.parse(os.path.join(project_dir, ".cproject"))
     matched = set()
@@ -371,6 +389,7 @@ class HelpBuilderGUI(tk.Tk):
 
         self.workspace = tk.StringVar(value=DEFAULT_WORKSPACE)
         self.create_hex = tk.BooleanVar(value=False)
+        self.only_build_last_version = tk.BooleanVar(value=False)
 
         self.revision_value = tk.StringVar(value="")
 
@@ -601,6 +620,15 @@ class HelpBuilderGUI(tk.Tk):
             ipady=7,
         )
 
+        ttk.Checkbutton(
+            revision_frame,
+            text="Only build last version",
+            variable=self.only_build_last_version,
+            style="Dark.TCheckbutton",
+        ).pack(
+            anchor="w",
+            pady=(4, 0),
+        )
         tk.Frame(
             panel,
             height=1,
@@ -1078,16 +1106,19 @@ class HelpBuilderGUI(tk.Tk):
             raise ValueError(
                 "Missing build configurations: " + ", ".join(missing)
             )
-
-        revision_value = self.revision_value.get().strip()
+        if self.only_build_last_version.get():
+            revision_value = str(read_latest_revision(version_file))
+            self.revision_value.set(revision_value)
+        else:
+            revision_value = self.revision_value.get().strip()
         if not revision_value.isdigit():
             raise ValueError(
                 "MANUAL REVISION INPUT must be a revision number"
-            )
+        )
         if int(revision_value) < 50:
             raise ValueError(
-                "MANUAL REVISION INPUT must be 50 or greater"
-            )
+            "MANUAL REVISION INPUT must be 50 or greater"
+        )
 
         if not project_uses_user_cflags(project_dir, selected):
             raise ValueError(
@@ -1120,6 +1151,8 @@ class HelpBuilderGUI(tk.Tk):
 
         if self.create_hex.get():
             command.append("--create-programmer-hex")
+        if self.only_build_last_version.get():
+            command.append("--only-build-last-version")
 
         return command
 

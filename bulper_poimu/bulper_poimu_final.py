@@ -10,6 +10,8 @@ import sys
 
 #added by poimu Supports CRC verification.
 import tempfile
+#added by poimu to import zip tools
+import zipfile
 
 
 BW_WORKSPACE="D:/Projects/STM32CubeIDE/workspace_1.15.0"
@@ -182,6 +184,7 @@ parser.add_argument('--ide', default=None)
 parser.add_argument('--git', default=None)
 parser.add_argument('--configuration', action='append', default=[])
 parser.add_argument('--create-programmer-hex', action='store_true')
+parser.add_argument('--only-build-last-version', action='store_true')
 
 args = parser.parse_args()
 
@@ -194,6 +197,7 @@ if args.ide:
     CDT_DIR = args.ide
 BW_PROJECT_DIR = args.directory
 CREATE_PROGRAMMER_HEX = args.create_programmer_hex
+ONLY_BUILD_LAST_VERSION = args.only_build_last_version
 
 #added by poimu Creates the build log early.
 BUILD_LOG_PATH = os.path.join(os.getcwd(), "bulper_build.log")
@@ -306,8 +310,8 @@ ACTIVE_UPDATE_PATHES_LIST = [
 ]
 
 #added by poimu Runs the real Revision 50 build and the requested Revision build.
-PACKAGE_REVISIONS = [50]
-if current_build_version > 50:
+PACKAGE_REVISIONS = [current_build_version] if ONLY_BUILD_LAST_VERSION else [50]
+if not ONLY_BUILD_LAST_VERSION and current_build_version > 50:
     PACKAGE_REVISIONS.append(current_build_version)
 
 RELEASE_ROOT = f"{RELEAS_DIR}/{VERSION_DIR}"
@@ -514,6 +518,55 @@ try:
                 70 + int(28 * _packaged_items / max(1, _total_packages)),
                 f"Packaged {package_revision}/{c}",
             )
+
+#ZIP CODE
+    ZIP_DIR = os.path.join(RELEAS_DIR, "zip")
+    os.makedirs(ZIP_DIR, exist_ok=True)
+
+    for package_revision in PACKAGE_REVISIONS:
+        release_path = os.path.join(
+            RELEASE_ROOT,
+            str(package_revision),
+        )
+
+        for c, u in zip(
+            ACTIVE_VARIATION_LIST,
+            ACTIVE_UPDATE_PATHES_LIST,
+        ):
+            zip_path = os.path.join(
+                ZIP_DIR,
+                f"{package_revision}-{c}.zip",
+            )
+
+            update_path = os.path.join(
+                release_path,
+                "FC22-UPDATE",
+                u,
+                "update.bin",
+            )
+
+            with zipfile.ZipFile(
+                zip_path,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+            ) as archive:
+
+                if package_revision == 50:
+                    configuration_update = os.path.join(
+                        release_path,
+                        c,
+                        "update.bin",
+                    )
+                    archive.write(
+                        configuration_update,
+                        "update.bin",
+                    )
+
+                archive.write(
+                    update_path,
+                    f"{u}/update.bin",
+                )
+            
 
     print("CRC presence and validity were verified.", flush=True)
     show_progress(100, "Release completed")
