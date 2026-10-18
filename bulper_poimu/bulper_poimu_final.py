@@ -179,6 +179,9 @@ parser.add_argument('--revision-value', type=int, required=True)
 parser.add_argument('--workspace', default=None)
 parser.add_argument('--project-name', default=None)
 parser.add_argument('--ide', default=None)
+parser.add_argument('--crc', default=None)
+parser.add_argument('--release-dir', default=None)
+parser.add_argument('--wl-release-path', default=None)
 parser.add_argument('--git', default=None)
 parser.add_argument('--configuration', action='append', default=[])
 parser.add_argument('--create-programmer-hex', action='store_true')
@@ -192,6 +195,12 @@ if args.workspace:
     BW_WORKSPACE = args.workspace
 if args.ide:
     CDT_DIR = args.ide
+if args.crc:
+    CRC_GEN_PATH = args.crc
+if args.release_dir:
+    RELEAS_DIR = args.release_dir
+if args.wl_release_path:
+    WL_RELEASE_PATH = args.wl_release_path
 BW_PROJECT_DIR = args.directory
 CREATE_PROGRAMMER_HEX = args.create_programmer_hex
 
