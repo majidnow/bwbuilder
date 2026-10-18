@@ -30,6 +30,8 @@ VARIATION_LIST = [
 DEFAULT_WORKSPACE = "D:/Projects/STM32CubeIDE/workspace_1.15.0"
 DEFAULT_IDE = "C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/headless-build.bat"
 DEFAULT_CRC = r"D:\Storage\tools\crcc\main.exe"
+DEFAULT_RELEASE_DIR = "D:/Storage/beachwolf/Archive/Release"
+DEFAULT_WL_RELEASE_PATH = "D:/Storage/wolfloader/Archive/ver 2"
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 PROGRESS = re.compile(r"\[\s*(\d+)%\]\s*(.*)")
@@ -228,7 +230,12 @@ def project_uses_user_cflags(project_dir, configuration_names):
 
     return all(name in matched for name in configuration_names)
 
-def resolve_cubeide_builder():
+def resolve_cubeide_builder(path=None):
+    if path is not None:
+        if not os.path.isfile(path):
+            raise ValueError("STM32CubeIDE builder not found")
+        return path
+
     if os.path.isfile(DEFAULT_IDE):
         return DEFAULT_IDE
 
@@ -268,7 +275,7 @@ def resolve_git_executable():
 
     raise ValueError("Git not found")
 
-def verify_bin_crc(bin_path):
+def verify_bin_crc(bin_path, crc_path=DEFAULT_CRC):
 
     if not os.path.isfile(bin_path):
         raise ValueError("Binary file not found")
@@ -282,7 +289,7 @@ def verify_bin_crc(bin_path):
     stored_crc = int.from_bytes(data[-2:], byteorder="little")
     payload = data[:-2]
 
-    if not os.path.isfile(DEFAULT_CRC):
+    if not os.path.isfile(crc_path):
         raise ValueError("CRC generator main.exe not found")
 
     temp_path = None
@@ -296,7 +303,7 @@ def verify_bin_crc(bin_path):
 
         calculated_crc = int(
             subprocess.check_output(
-                [DEFAULT_CRC, temp_path],
+                [crc_path, temp_path],
                 text=True,
                 creationflags=hidden_flags(),
             ).strip()
@@ -307,6 +314,45 @@ def verify_bin_crc(bin_path):
 
     valid = stored_crc == calculated_crc
     return valid, valid, stored_crc, calculated_crc
+
+#added by poimu Creates a CRC-appended copy of an existing binary.
+def create_bin_with_crc(bin_path, output_path, crc_path=DEFAULT_CRC):
+    if not os.path.isfile(bin_path):
+        raise ValueError("Binary file not found")
+    if not os.path.isfile(crc_path):
+        raise ValueError("CRC generator main.exe not found")
+    if (
+        os.path.normcase(os.path.abspath(bin_path))
+        == os.path.normcase(os.path.abspath(output_path))
+        or (os.path.exists(output_path) and os.path.samefile(bin_path, output_path))
+    ):
+        raise ValueError("Select an output file different from the input file")
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".bin",
+            dir=os.path.dirname(os.path.abspath(output_path)),
+        ) as temp:
+            temp_path = temp.name
+        shutil.copyfile(bin_path, temp_path)
+        crc = int(subprocess.check_output(
+            [crc_path, temp_path],
+            text=True,
+            creationflags=hidden_flags(),
+        ).strip())
+        crc_bytes = crc.to_bytes(2, byteorder="little")
+        with open(temp_path, "ab") as output:
+            output.write(crc_bytes)
+        if not verify_bin_crc(temp_path, crc_path)[1]:
+            raise ValueError("CRC verification failed")
+        os.replace(temp_path, output_path)
+        return crc
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
 
 def extract_error_entries(text):
 
@@ -382,11 +428,19 @@ class HelpBuilderGUI(tk.Tk):
         self.iconphoto(True, self.app_icon)
 
         self.title("Fartak Control - Help Builder")
-        self.geometry("610x650")
-        self.minsize(520, 560)
+        self.geometry("610x810")
+        self.minsize(520, 720)
         self.configure(bg=self.BG)
 
         self.workspace = tk.StringVar(value=DEFAULT_WORKSPACE)
+        try:
+            ide = resolve_cubeide_builder()
+        except ValueError:
+            ide = DEFAULT_IDE
+        self.ide = tk.StringVar(value=ide)
+        self.crc = tk.StringVar(value=DEFAULT_CRC)
+        self.release_dir = tk.StringVar(value=DEFAULT_RELEASE_DIR)
+        self.wl_release_path = tk.StringVar(value=DEFAULT_WL_RELEASE_PATH)
         self.create_hex = tk.BooleanVar(value=False)
         self.only_build_last_version = tk.BooleanVar(value=False)
 
@@ -504,7 +558,7 @@ class HelpBuilderGUI(tk.Tk):
 
         tk.Label(
             panel,
-            text="Workspace",
+            text="BW_WORKSPACE",
             bg=self.PANEL,
             fg=self.MUTED,
             font=("Segoe UI", 9),
@@ -524,7 +578,7 @@ class HelpBuilderGUI(tk.Tk):
             fg=self.TEXT,
             insertbackground=self.TEXT,
             relief="flat",
-            bd=0,
+            bd=5,
             font=("Consolas", 9),
         )
         entry.grid(
@@ -533,7 +587,7 @@ class HelpBuilderGUI(tk.Tk):
             sticky="ew",
             padx=(12, 8),
             pady=(0, 11),
-            ipady=7,
+            ipady=2,
         )
         entry.bind(
             "<Return>",
@@ -562,6 +616,73 @@ class HelpBuilderGUI(tk.Tk):
             pady=(0, 11),
             ipady=4,
         )
+
+        #added by poimu Selects paths in two columns below the Workspace.
+        paths = tk.Frame(panel, bg=self.PANEL)
+        paths.grid(row=2, column=0, columnspan=2, sticky="ew")
+        paths.grid_columnconfigure(0, weight=1, uniform="paths")
+        paths.grid_columnconfigure(1, weight=1, uniform="paths")
+        for row, column, label, variable, command in (
+            (0, 0, "CDT_DIR", self.ide, self.choose_ide),
+            (0, 1, "RELEAS_DIR", self.release_dir, self.choose_release_dir),
+            (1, 0, "WL_RELEASE_PATH", self.wl_release_path, self.choose_wl_release_path),
+            (1, 1, "CRC_GEN_PATH", self.crc, self.choose_crc),
+        ):
+            field = tk.Frame(paths, bg=self.PANEL)
+            field.grid(row=row, column=column, sticky="ew")
+            field.grid_columnconfigure(0, weight=1)
+            tk.Label(
+                field,
+                text=label,
+                bg=self.PANEL,
+                fg=self.MUTED,
+                font=("Segoe UI", 9),
+            ).grid(
+                row=0,
+                column=0,
+                columnspan=2,
+                sticky="w",
+                padx=12,
+                pady=(10, 4),
+            )
+
+            tk.Entry(
+                field,
+                textvariable=variable,
+                width=1,
+                bg=self.BG,
+                fg=self.TEXT,
+                insertbackground=self.TEXT,
+                relief="flat",
+                bd=5,
+                font=("Consolas", 9),
+            ).grid(
+                row=1,
+                column=0,
+                sticky="ew",
+                padx=(12, 8),
+                pady=(0, 11),
+                ipady=2,
+            )
+
+            tk.Button(
+                field,
+                text="Browse",
+                command=command,
+                bg=self.BUTTON,
+                fg=self.TEXT,
+                activebackground="#303030",
+                activeforeground=self.TEXT,
+                relief="flat",
+                bd=0,
+                padx=12,
+            ).grid(
+                row=1,
+                column=1,
+                padx=(0, 12),
+                pady=(0, 11),
+                ipady=4,
+            )
 
     def build_options_panel(self):
         panel = self._panel()
@@ -610,13 +731,13 @@ class HelpBuilderGUI(tk.Tk):
             fg=self.TEXT,
             insertbackground=self.TEXT,
             relief="flat",
-            bd=0,
+            bd=5,
             font=("Consolas", 9),
         ).pack(
             fill="x",
             anchor="w",
             pady=(4, 0),
-            ipady=7,
+            ipady=2,
         )
 
         ttk.Checkbutton(
@@ -860,6 +981,42 @@ class HelpBuilderGUI(tk.Tk):
         if selected:
             self.workspace.set(selected.replace("\\", "/"))
 
+    def choose_ide(self):
+        selected = filedialog.askopenfilename(
+            title="Select STM32CubeIDE headless-build.bat",
+            initialdir=os.path.dirname(self.ide.get()) or None,
+            filetypes=[("Batch files", "*.bat"), ("All files", "*.*")],
+        )
+        if selected:
+            self.ide.set(selected.replace("\\", "/"))
+
+    def choose_crc(self):
+        selected = filedialog.askopenfilename(
+            title="Select CRC generator main.exe",
+            initialdir=os.path.dirname(self.crc.get()) or None,
+            filetypes=[("Executable files", "*.exe"), ("All files", "*.*")],
+        )
+        if selected:
+            self.crc.set(selected.replace("\\", "/"))
+
+    def choose_release_dir(self):
+        selected = filedialog.askdirectory(
+            title="RELEAS_DIR",
+            initialdir=self.release_dir.get() or None,
+            mustexist=False,
+        )
+        if selected:
+            self.release_dir.set(selected.replace("\\", "/"))
+
+    def choose_wl_release_path(self):
+        selected = filedialog.askdirectory(
+            title="WL_RELEASE_PATH",
+            initialdir=self.wl_release_path.get() or None,
+            mustexist=True,
+        )
+        if selected:
+            self.wl_release_path.set(selected.replace("\\", "/"))
+
     def workspace_changed(self, *_):
         if self.workspace_refresh_job is not None:
             self.after_cancel(self.workspace_refresh_job)
@@ -1079,7 +1236,16 @@ class HelpBuilderGUI(tk.Tk):
             resolve_workspace_project(self.workspace.get())
         )
         version_file = resolve_version_file(project_dir)
-        ide = resolve_cubeide_builder()
+        ide = resolve_cubeide_builder(self.ide.get().strip())
+        crc = self.crc.get().strip()
+        if not os.path.isfile(crc):
+            raise ValueError("CRC generator main.exe not found")
+        release_dir = self.release_dir.get().strip()
+        if not release_dir:
+            raise ValueError("Select RELEAS_DIR")
+        wl_release_path = self.wl_release_path.get().strip()
+        if not os.path.isdir(wl_release_path):
+            raise ValueError("WL_RELEASE_PATH not found")
         configurations = read_cproject(project_dir)
 
         git = resolve_git_executable()
@@ -1139,6 +1305,12 @@ class HelpBuilderGUI(tk.Tk):
             project_name,
             "--ide",
             ide,
+            "--crc",
+            crc,
+            "--release-dir",
+            release_dir,
+            "--wl-release-path",
+            wl_release_path,
             "--git",
             git,
             "--revision-value",
@@ -1346,8 +1518,12 @@ class HelpBuilderGUI(tk.Tk):
 
     def open_error_log(self):
         window = tk.Toplevel(self)
+        window.withdraw()
         window.title("Fartak Control - Error Log")
-        window.geometry("650x330")
+        self.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - 650) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - 330) // 2
+        window.geometry(f"650x330+{x}+{y}")
         window.minsize(520, 260)
         window.configure(bg=self.BG)
         window.transient(self)
@@ -1460,12 +1636,17 @@ class HelpBuilderGUI(tk.Tk):
             )
 
         error_text.config(state="disabled")
+        window.deiconify()
 
     def open_crc_tool(self):
         window = tk.Toplevel(self)
+        window.withdraw()
         window.title("Fartak Control - CRC Tool")
-        window.geometry("520x265")
-        window.minsize(470, 240)
+        self.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - 520) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - 540) // 2
+        window.geometry(f"520x540+{x}+{y}")
+        window.minsize(470, 520)
         window.configure(bg=self.BG)
         window.transient(self)
 
@@ -1520,7 +1701,7 @@ class HelpBuilderGUI(tk.Tk):
             fg=self.TEXT,
             insertbackground=self.TEXT,
             relief="flat",
-            bd=0,
+            bd=5,
             font=("Consolas", 9),
         )
         entry.grid(
@@ -1529,7 +1710,7 @@ class HelpBuilderGUI(tk.Tk):
             sticky="ew",
             padx=(12, 8),
             pady=(0, 10),
-            ipady=7,
+            ipady=2,
         )
 
         def choose_file():
@@ -1558,7 +1739,7 @@ class HelpBuilderGUI(tk.Tk):
 
             try:
                 present, valid, stored_crc, calculated_crc = (
-                    verify_bin_crc(path)
+                    verify_bin_crc(path, self.crc.get().strip())
                 )
             except Exception as exc:
                 present_status.set("CRC detected: ✕")
@@ -1668,6 +1849,134 @@ class HelpBuilderGUI(tk.Tk):
             pady=(0, 12),
             ipady=7,
         )
+
+        #added by poimu Adds CRC to a manually selected raw binary.
+        raw_file_path = tk.StringVar()
+        append_status = tk.StringVar(value="Select a raw .bin file")
+        append_panel = tk.Frame(
+            window,
+            bg=self.PANEL,
+            highlightbackground=self.BORDER,
+            highlightthickness=1,
+        )
+        append_panel.pack(fill="both", expand=True, padx=18, pady=(0, 18))
+        append_panel.grid_columnconfigure(0, weight=1)
+
+        tk.Label(
+            append_panel,
+            text="ADD CRC",
+            bg=self.PANEL,
+            fg=self.TEXT,
+            font=("Segoe UI Semibold", 13),
+        ).grid(
+            row=0, column=0, columnspan=2, sticky="w",
+            padx=12, pady=(12, 3),
+        )
+        tk.Label(
+            append_panel,
+            text="Append 16-bit CRC to a copy of a raw .bin file",
+            bg=self.PANEL,
+            fg=self.MUTED,
+            font=("Segoe UI", 9),
+        ).grid(
+            row=1, column=0, columnspan=2, sticky="w",
+            padx=12, pady=(0, 10),
+        )
+        tk.Entry(
+            append_panel,
+            textvariable=raw_file_path,
+            bg=self.BG,
+            fg=self.TEXT,
+            insertbackground=self.TEXT,
+            relief="flat",
+            bd=5,
+            font=("Consolas", 9),
+        ).grid(
+            row=2, column=0, sticky="ew",
+            padx=(12, 8), pady=(0, 10), ipady=2,
+        )
+
+        def choose_raw_file():
+            selected = filedialog.askopenfilename(
+                title="Select raw .bin file",
+                filetypes=[("Binary files", "*.bin"), ("All files", "*.*")],
+            )
+            if selected:
+                raw_file_path.set(selected.replace("\\", "/"))
+                append_status.set("Ready to add CRC")
+
+        def append_crc():
+            path = raw_file_path.get().strip()
+            if not os.path.isfile(path):
+                messagebox.showwarning(
+                    "Fartak Control", "Select a raw .bin file", parent=window,
+                )
+                return
+            output_path = filedialog.asksaveasfilename(
+                title="Save binary with CRC",
+                initialdir=os.path.dirname(os.path.abspath(path)),
+                initialfile=os.path.splitext(os.path.basename(path))[0] + "_crc.bin",
+                defaultextension=".bin",
+                filetypes=[("Binary files", "*.bin"), ("All files", "*.*")],
+                parent=window,
+            )
+            if not output_path:
+                return
+            try:
+                crc = create_bin_with_crc(path, output_path, self.crc.get().strip())
+            except Exception as exc:
+                append_status.set(str(exc))
+                return
+            append_status.set(f"CRC {crc} appended and verified")
+            messagebox.showinfo(
+                "Fartak Control", f"Saved binary with CRC:\n{output_path}",
+                parent=window,
+            )
+
+        tk.Button(
+            append_panel,
+            text="Browse",
+            command=choose_raw_file,
+            bg=self.BUTTON,
+            fg=self.TEXT,
+            activebackground="#303030",
+            activeforeground=self.TEXT,
+            relief="flat",
+            bd=0,
+            padx=12,
+        ).grid(
+            row=2, column=1, padx=(0, 12), pady=(0, 10), ipady=4,
+        )
+        tk.Label(
+            append_panel,
+            textvariable=append_status,
+            bg=self.PANEL,
+            fg=self.MUTED,
+            font=("Consolas", 8),
+            anchor="w",
+            wraplength=400,
+            justify="left",
+        ).grid(
+            row=3, column=0, columnspan=2, sticky="ew",
+            padx=12, pady=(5, 8),
+        )
+        tk.Button(
+            append_panel,
+            text="SAVE BIN + CRC",
+            command=append_crc,
+            bg=self.ACCENT,
+            fg=self.BG,
+            activebackground="#cfcfcf",
+            activeforeground=self.BG,
+            relief="flat",
+            bd=0,
+            font=("Segoe UI Semibold", 9),
+        ).grid(
+            row=4, column=0, columnspan=2, sticky="ew",
+            padx=12, pady=(0, 12), ipady=7,
+        )
+
+        window.deiconify()
 
     def close_app(self):
         if (
